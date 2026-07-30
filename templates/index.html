@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Thalassemia Detection - Capture</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="tab-group">
+        <div class="tab tab-active">Capture</div>
+        <div
+          class="tab tab-disabled"
+          title="Belum tersedia di scope prototype ini"
+        >
+          Segmentasi
+        </div>
+      </div>
+      <div class="camera-group">
+        <div class="camera-status">
+          <span id="cameraDot" class="dot dot-off"></span>
+          <span id="cameraLabel">Kamera tidak terdeteksi</span>
+        </div>
+        <select id="cameraSelect" class="camera-select"></select>
+        <select
+          id="resolutionSelect"
+          class="camera-select"
+          title="Resolusi hasil simpan. Kalau kamera mendukung, diatur langsung di kamera; kalau tidak (mis. MiiCam), gambar diperkecil otomatis saat disimpan."
+        >
+          <option value="">Bawaan kamera (maksimal)</option>
+          <option value="1920x1080">1920 x 1080</option>
+          <option value="1280x720">1280 x 720</option>
+          <option value="640x480">640 x 480</option>
+        </select>
+        <button id="btnConnectCamera" class="btn btn-outline">Hubungkan</button>
+      </div>
+    </div>
+
+    <div class="page">
+      <div class="header-row">
+        <div class="patient-field">
+          <label for="patientName">Inisial Pasien</label>
+          <input
+            id="patientName"
+            type="text"
+            placeholder="Masukkan inisial pasien..."
+          />
+        </div>
+      </div>
+
+      <div class="toolbar-row">
+        <button id="btnCapture" class="btn btn-primary" disabled>
+          &#9679; Capture
+        </button>
+        <div class="toolbar-right">
+          <button id="btnFolder" class="btn btn-outline">Lokasi Simpan</button>
+          <button id="btnSummary" class="btn btn-outline" disabled>
+            Ringkasan Folder
+          </button>
+          <button id="btnSave" class="btn btn-success" disabled>Save</button>
+        </div>
+      </div>
+      <div id="folderPath" class="folder-path"></div>
+
+      <div id="summaryPanel" class="summary-panel summary-hidden">
+        <div class="summary-header">
+          <span>Ringkasan folder tujuan</span>
+          <button id="btnCloseSummary" class="summary-close">&times;</button>
+        </div>
+        <div id="summaryBody" class="summary-body"></div>
+      </div>
+
+      <div class="panels-row">
+        <div class="panel">
+          <div class="panel-title">
+            <span class="dot dot-live"></span>Stream Mikroskop
+          </div>
+          <div class="panel-body" id="streamBody">
+            <span class="placeholder-text"
+              >Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop untuk
+              memulai</span
+            >
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title-row">
+            <div class="panel-title">
+              <span class="dot dot-idle"></span>Hasil Capture
+            </div>
+            <div class="badge-group">
+              <div id="focusBadge" class="badge badge-hidden"></div>
+              <div id="blankBadge" class="badge badge-hidden"></div>
+              <div id="captureBadge" class="badge badge-hidden"></div>
+            </div>
+          </div>
+          <div class="panel-body" id="captureBody">
+            <span class="placeholder-text">Belum ada gambar</span>
+          </div>
+          <div id="captureFilename" class="capture-filename"></div>
+        </div>
+      </div>
+
+      <div class="gallery-row">
+        <div class="gallery-title">Riwayat tersimpan sesi ini</div>
+        <div id="galleryStrip" class="gallery-strip">
+          <span class="gallery-empty">Belum ada yang disimpan di sesi ini.</span>
+        </div>
+      </div>
+
+      <div class="footer-row">
+        <div class="footer-count">
+          Jumlah gambar tercapture : <span id="captureCount">0</span>
+        </div>
+        <div class="footer-format">
+          Format penyimpanan: inisial-pasien_timestamp_iterasi.png
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast toast-hidden"></div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  </body>
+</html>
