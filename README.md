@@ -4,7 +4,7 @@ Aplikasi web lokal untuk akuisisi citra apusan darah tepi dari kamera mikroskop 
 
 ## Persyaratan
 
-Aplikasi ini bisa jalan di **Windows** atau **Ubuntu/Linux** -- kode backend-nya sama, cuma cara install & sedikit perilaku kamera yang beda per OS (lihat masing-masing di bawah).
+Aplikasi ini bisa jalan di **Windows** atau **Ubuntu/Linux**.
 
 ### Windows
 
