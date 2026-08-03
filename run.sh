@@ -12,9 +12,23 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-if [ ! -d "venv" ]; then
+if [ ! -f "venv/bin/activate" ]; then
+    if [ -d "venv" ]; then
+        echo "Folder venv yang ada sepertinya tidak lengkap (mungkin dari percobaan sebelumnya yang gagal), membuat ulang..."
+        rm -rf venv
+    fi
+
     echo "Membuat virtual environment (venv)..."
-    python3 -m venv venv
+    if ! python3 -m venv venv || [ ! -f "venv/bin/activate" ]; then
+        rm -rf venv
+        echo ""
+        echo "Gagal membuat virtual environment yang lengkap."
+        echo "Kemungkinan besar paket python3-venv belum terinstall. Coba:"
+        echo "  sudo apt update && sudo apt install python3-venv"
+        echo "(sesuaikan versi Python kamu kalau perlu, misal python3.11-venv -- cek dengan python3 --version)"
+        echo "Lalu jalankan lagi ./run.sh"
+        exit 1
+    fi
 fi
 
 source venv/bin/activate

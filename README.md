@@ -91,6 +91,9 @@ thalassemia-capture-app/
 
 ## Troubleshooting
 
+**Ubuntu: `venv/bin/activate: No such file or directory`**
+- Biasanya karena paket `python3-venv` belum terinstall, jadi `python3 -m venv venv` gagal separuh jalan. Install: `sudo apt update && sudo apt install python3-venv` (sesuaikan versi Python kamu, mis. `python3.11-venv` -- cek dengan `python3 --version`), lalu jalankan lagi `./run.sh` (skrip otomatis bikin ulang venv yang rusak).
+
 **Kamera tidak muncul di dropdown**
 - Windows: pastikan driver DirectShow kamera sudah terinstall. Cek juga di Device Manager apakah kamera memang terbaca di level Windows.
 - Ubuntu/Linux: cek `v4l2-ctl --list-devices` -- kalau kamera tidak muncul di situ juga, berarti belum terbaca di level sistem (coba kabel/port USB lain).
