@@ -62,7 +62,18 @@ class CameraManager:
         for i in range(max_index):
             cap = cv2.VideoCapture(i, backend)
             if cap is not None and cap.isOpened():
-                available.append({"index": i, "name": f"Kamera USB #{i}"})
+                name = f"Kamera USB #{i}"
+                if os.name == "posix":
+                    name_path = f"/sys/class/video4linux/video{i}/name"
+                    try:
+                        if os.path.isfile(name_path):
+                            with open(name_path, "r") as f:
+                                real_name = f.read().strip()
+                            if real_name:
+                                name = real_name
+                    except OSError:
+                        pass
+                available.append({"index": i, "name": name})
             if cap is not None:
                 cap.release()
         return available
