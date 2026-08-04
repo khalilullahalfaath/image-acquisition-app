@@ -3,6 +3,9 @@ const cameraLabel = document.getElementById("cameraLabel");
 const cameraSelect = document.getElementById("cameraSelect");
 const resolutionSelect = document.getElementById("resolutionSelect");
 const btnConnectCamera = document.getElementById("btnConnectCamera");
+const btnRefreshCameras = document.getElementById("btnRefreshCameras");
+// null kalau OS server bukan Windows -- tombol ini disembunyikan server-side
+// (lihat templates/index.html) karena dialog driver cuma didukung DirectShow.
 const btnCameraSettings = document.getElementById("btnCameraSettings");
 
 const btnCapture = document.getElementById("btnCapture");
@@ -25,6 +28,11 @@ const patientNameInput = document.getElementById("patientName");
 const toast = document.getElementById("toast");
 const galleryStrip = document.getElementById("galleryStrip");
 
+const confirmModal = document.getElementById("confirmModal");
+const confirmModalMessage = document.getElementById("confirmModalMessage");
+const confirmModalOk = document.getElementById("confirmModalOk");
+const confirmModalCancel = document.getElementById("confirmModalCancel");
+
 let selectedFolder = null;
 let hasCapturedImage = false;
 let lastSavedId = null; // ID pasien terakhir yang berhasil disimpan di sesi ini
@@ -37,6 +45,32 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.remove("toast-hidden");
   setTimeout(() => toast.classList.add("toast-hidden"), 3000);
+}
+
+// Pengganti window.confirm() bawaan browser -- tampilannya konsisten dengan
+// desain aplikasi (bukan popup native OS/browser), dan tetap modal (nge-block
+// interaksi lain sampai user pilih salah satu tombol). Resolve(true) kalau
+// user klik Lanjutkan, resolve(false) kalau Batal.
+function showConfirmModal(message) {
+  return new Promise((resolve) => {
+    confirmModalMessage.textContent = message;
+    confirmModal.classList.remove("modal-hidden");
+
+    function cleanup(result) {
+      confirmModal.classList.add("modal-hidden");
+      confirmModalOk.removeEventListener("click", onOk);
+      confirmModalCancel.removeEventListener("click", onCancel);
+      resolve(result);
+    }
+    function onOk() {
+      cleanup(true);
+    }
+    function onCancel() {
+      cleanup(false);
+    }
+    confirmModalOk.addEventListener("click", onOk);
+    confirmModalCancel.addEventListener("click", onCancel);
+  });
 }
 
 async function loadCameras() {
@@ -55,6 +89,20 @@ async function loadCameras() {
     opt.textContent = cam.name;
     cameraSelect.appendChild(opt);
   });
+}
+
+// Dipakai bareng oleh connectCamera() (setelah klik Hubungkan) dan
+// restoreCameraStatusIfConnected() (setelah reload halaman, kalau backend
+// ternyata masih terhubung dari sebelumnya) -- biar UI "Aktif"-nya konsisten
+// dari dua jalur berbeda ini.
+function applyConnectedUI(selectedName, width, height) {
+  const resText = width && height ? ` (${width}x${height})` : "";
+  cameraDot.className = "dot dot-on";
+  cameraLabel.textContent = "Aktif: " + selectedName + resText;
+  streamBody.innerHTML = '<img src="/stream" alt="stream" />';
+  btnCapture.disabled = false;
+  if (btnCameraSettings) btnCameraSettings.disabled = false;
+  isCameraConnected = true;
 }
 
 async function connectCamera() {
@@ -83,17 +131,11 @@ async function connectCamera() {
     const selectedName = cameraSelect.options[cameraSelect.selectedIndex]
       ? cameraSelect.options[cameraSelect.selectedIndex].text
       : "index " + data.index;
-    const resText = data.width && data.height ? ` (${data.width}x${data.height})` : "";
-    cameraDot.className = "dot dot-on";
-    cameraLabel.textContent = "Aktif: " + selectedName + resText;
-    streamBody.innerHTML = '<img src="/stream" alt="stream" />';
-    btnCapture.disabled = false;
-    btnCameraSettings.disabled = false;
-    isCameraConnected = true;
+    applyConnectedUI(selectedName, data.width, data.height);
   } else {
     cameraDot.className = "dot dot-off";
     cameraLabel.textContent = "Gagal menghubungkan kamera";
-    btnCameraSettings.disabled = true;
+    if (btnCameraSettings) btnCameraSettings.disabled = true;
     isCameraConnected = false;
     showToast(data.message || "Tidak bisa membuka kamera index " + index);
   }
@@ -106,7 +148,7 @@ function handleCameraDisconnected() {
   streamBody.innerHTML =
     '<span class="placeholder-text">Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop untuk memulai</span>';
   btnCapture.disabled = true;
-  btnCameraSettings.disabled = true;
+  if (btnCameraSettings) btnCameraSettings.disabled = true;
   showToast("Koneksi ke kamera terputus. Cek kabel USB, lalu klik Hubungkan lagi.");
 }
 
@@ -119,6 +161,28 @@ async function checkCameraStatus() {
   } catch (e) {
     // Abaikan error jaringan sesaat, biar nggak salah nganggep disconnect
     // gara-gara satu request gagal doang.
+  }
+}
+
+// Dipanggil sekali di awal (setelah loadCameras() ngisi dropdown) -- kalau
+// server ternyata masih ada koneksi kamera aktif dari sebelum halaman
+// di-reload (mis. Flask debug-reload, atau user cuma reload tab tanpa
+// server-nya direstart), UI ikut disinkronkan tanpa user harus klik
+// Hubungkan lagi secara manual.
+async function restoreCameraStatusIfConnected() {
+  try {
+    const res = await fetch("/api/camera/status");
+    const data = await res.json();
+    if (!data.connected || data.index === null || data.index === undefined) return;
+
+    cameraSelect.value = String(data.index);
+    const selectedName = cameraSelect.options[cameraSelect.selectedIndex]
+      ? cameraSelect.options[cameraSelect.selectedIndex].text
+      : "index " + data.index;
+    applyConnectedUI(selectedName, data.width, data.height);
+  } catch (e) {
+    // Server belum siap/nggak bisa dihubungi sesaat -- biarkan UI default
+    // (belum connect), user masih bisa klik Hubungkan manual seperti biasa.
   }
 }
 
@@ -238,7 +302,7 @@ async function doSave() {
   // Kalau ID pasien beda dari yang terakhir disimpan di sesi ini, konfirmasi
   // dulu -- biar nggak salah nyimpen ke pasien yang salah tanpa sadar.
   if (lastSavedId && currentId !== lastSavedId) {
-    const lanjut = confirm(
+    const lanjut = await showConfirmModal(
       `ID pasien berubah dari "${lastSavedId}" ke "${currentId}".\n\n` +
       `Lanjutkan simpan untuk "${currentId}"?`
     );
@@ -248,7 +312,7 @@ async function doSave() {
   // Kalau capture yang sama (belum capture ulang) sudah pernah disimpan,
   // konfirmasi dulu -- biar nggak numpuk file duplikat isinya tanpa sadar.
   if (currentCaptureSaved) {
-    const lanjut = confirm(
+    const lanjut = await showConfirmModal(
       `Gambar ini sudah disimpan sebelumnya sebagai "${currentCaptureSavedAs}".\n\n` +
       `Simpan lagi sebagai file baru (isi gambarnya tetap sama)?`
     );
@@ -299,7 +363,8 @@ async function doSave() {
 }
 
 btnConnectCamera.addEventListener("click", connectCamera);
-btnCameraSettings.addEventListener("click", openCameraSettings);
+if (btnCameraSettings) btnCameraSettings.addEventListener("click", openCameraSettings);
+btnRefreshCameras.addEventListener("click", loadCameras);
 btnCapture.addEventListener("click", doCapture);
 btnFolder.addEventListener("click", doSelectFolder);
 btnSave.addEventListener("click", doSave);
@@ -310,5 +375,17 @@ btnCloseSummary.addEventListener("click", () => {
 });
 patientNameInput.addEventListener("input", updateSaveButtonState);
 
-loadCameras();
+// Peringatan kalau tab ditutup/direload padahal ada hasil capture yang
+// belum disimpan -- ini SATU-SATUNYA dialog yang tetap pakai bawaan
+// browser (bukan modal custom kayak yang lain), karena beforeunload memang
+// tidak bisa dikustomisasi tampilannya di semua browser modern (dibatasi
+// spec, buat cegah abuse popup pas nutup tab).
+window.addEventListener("beforeunload", (e) => {
+  if (hasCapturedImage && !currentCaptureSaved) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+
+loadCameras().then(restoreCameraStatusIfConnected);
 setInterval(checkCameraStatus, 2000);

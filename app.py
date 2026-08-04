@@ -32,6 +32,13 @@ BLANK_STD_THRESHOLD = 5.0
 OPENCV_DISCONNECT_THRESHOLD = 15
 LOG_FILENAME = "capture_log.csv"
 
+# Lindungi critical section /api/save (hitung iterasi + tulis file + tulis
+# log CSV) dari race condition kalau ada dua request /api/save nyaris
+# bersamaan (Flask jalan threaded=True) -- tanpa ini, dua request bisa saja
+# baca "iterasi berikutnya" yang sama sebelum salah satu selesai menulis,
+# jadi filename ketimpa/duplikat atau baris CSV keselip.
+save_lock = threading.Lock()
+
 
 # ---------------------------------------------------------------------------
 # SDK vendor ToupCam (opsional, cuma dipakai di Linux)
@@ -100,6 +107,8 @@ class CameraManager:
         self.backend = None          # "opencv" atau "toupcam", None kalau belum connect
         self.cap = None              # cv2.VideoCapture, dipakai kalau backend == "opencv"
         self.current_index = None    # index tampilan (posisi di list_cameras())
+        self.current_width = None    # resolusi aktual kamera yang sedang terhubung
+        self.current_height = None
         self.last_frame = None       # frame terakhir dari stream (untuk MJPEG)
         self.captured_frame = None   # frame yang dibekukan lewat tombol Capture
         self.captured_focus_score = None
@@ -205,6 +214,8 @@ class CameraManager:
                 result = self._open_opencv_locked(cv_index, width, height)
 
             self.current_index = index if result.get("ok") else None
+            self.current_width = result.get("width") if result.get("ok") else None
+            self.current_height = result.get("height") if result.get("ok") else None
             return result
 
     def _release_locked(self):
@@ -501,7 +512,10 @@ def log_capture_csv(folder, row):
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
-    return render_template("index.html")
+    # Dialog "Pengaturan Driver" cuma didukung Windows+DirectShow -- dipakai
+    # template buat sembunyikan tombolnya di OS lain (Linux/toupcam) daripada
+    # nampilin tombol yang kalau diklik cuma keluar toast "tidak didukung".
+    return render_template("index.html", is_windows=(os.name == "nt"))
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +551,13 @@ def api_camera_settings():
 
 @app.route("/api/camera/status")
 def api_camera_status():
-    return jsonify({"connected": camera.is_connected(), "index": camera.current_index})
+    connected = camera.is_connected()
+    return jsonify({
+        "connected": connected,
+        "index": camera.current_index if connected else None,
+        "width": camera.current_width if connected else None,
+        "height": camera.current_height if connected else None,
+    })
 
 
 @app.route("/stream")
@@ -607,29 +627,36 @@ def api_save():
     slug = safe_slug(patient_name)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    iterasi = next_iteration_from_folder(folder, slug)
+    # Semua langkah di bawah ini (hitung iterasi berikutnya dari isi folder,
+    # tulis file gambar, tulis baris log CSV) harus jadi satu unit atomik --
+    # kalau dua request /api/save nyaris bersamaan (Flask threaded=True)
+    # jalan tanpa lock ini, keduanya bisa saja baca "iterasi berikutnya" yang
+    # sama sebelum salah satu selesai menulis, jadi filename ketimpa/duplikat
+    # atau baris CSV keselip/korup.
+    with save_lock:
+        iterasi = next_iteration_from_folder(folder, slug)
 
-    # Kalau kamera tidak bisa diatur resolusinya langsung (mis. MiiCam),
-    # ini fallback: kecilin gambar secara software persis sebelum disimpan.
-    frame_to_save = resize_for_save(camera.captured_frame, target_width, target_height)
+        # Kalau kamera tidak bisa diatur resolusinya langsung (mis. MiiCam),
+        # ini fallback: kecilin gambar secara software persis sebelum disimpan.
+        frame_to_save = resize_for_save(camera.captured_frame, target_width, target_height)
 
-    filename = f"{slug}_{timestamp}_{iterasi:02d}.png"
-    full_path = os.path.join(folder, filename)
+        filename = f"{slug}_{timestamp}_{iterasi:02d}.png"
+        full_path = os.path.join(folder, filename)
 
-    ok = cv2.imwrite(full_path, frame_to_save)
-    if not ok:
-        return jsonify({"ok": False, "message": "Gagal menyimpan file."}), 500
+        ok = cv2.imwrite(full_path, frame_to_save)
+        if not ok:
+            return jsonify({"ok": False, "message": "Gagal menyimpan file."}), 500
 
-    height, width = frame_to_save.shape[:2]
-    log_capture_csv(folder, {
-        "timestamp": timestamp,
-        "patient_id": slug,
-        "filename": filename,
-        "iterasi": iterasi,
-        "camera": camera_name or "?",
-        "resolution": f"{width}x{height}",
-        "focus_score": round(camera.captured_focus_score or 0, 1),
-    })
+        height, width = frame_to_save.shape[:2]
+        log_capture_csv(folder, {
+            "timestamp": timestamp,
+            "patient_id": slug,
+            "filename": filename,
+            "iterasi": iterasi,
+            "camera": camera_name or "?",
+            "resolution": f"{width}x{height}",
+            "focus_score": round(camera.captured_focus_score or 0, 1),
+        })
 
     return jsonify(
         {
