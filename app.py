@@ -226,9 +226,24 @@ class CameraManager:
 
         if width and height:
             try:
-                h.put_Size(int(width), int(height))
+                # Sensor ToupCam cuma mendukung daftar resolusi diskrit
+                # tertentu (bukan sembarang angka) -- put_Size(width, height)
+                # dengan nilai yang bukan salah satu step itu akan ditolak
+                # (E_INVALIDARG). Jadi cari dulu resolusi valid TERDEKAT dari
+                # daftar yang benar-benar didukung kamera, baru pakai
+                # put_eSize(index) buat pilih itu.
+                target_w, target_h = int(width), int(height)
+                n = h.ResolutionNumber()
+                best_idx, best_score = None, None
+                for i in range(n):
+                    rw, rh = h.get_Resolution(i)
+                    score = abs(rw - target_w) + abs(rh - target_h)
+                    if best_score is None or score < best_score:
+                        best_idx, best_score = i, score
+                if best_idx is not None:
+                    h.put_eSize(best_idx)
             except Exception as e:
-                print(f"[DEBUG] ToupCam put_Size gagal (lanjut pakai resolusi default): {e}")
+                print(f"[DEBUG] ToupCam set resolusi gagal (lanjut pakai resolusi default): {e}")
 
         try:
             # RealTime = SDK selalu kirim frame TERBARU dan buang backlog,
