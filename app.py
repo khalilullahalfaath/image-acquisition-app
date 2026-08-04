@@ -240,7 +240,7 @@ class CameraManager:
 
         self._tc_handle = h
         self._tc_row_pitch = w * 3
-        self._tc_buf = bytearray(self._tc_row_pitch * ht)
+        self._tc_buf = bytes(self._tc_row_pitch * ht)
         self._tc_width = w
         self._tc_height = ht
         self._tc_connected = True
