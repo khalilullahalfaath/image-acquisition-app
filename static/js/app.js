@@ -31,6 +31,7 @@ let lastSavedId = null; // ID pasien terakhir yang berhasil disimpan di sesi ini
 let lastCapturedImage = null; // base64 PNG hasil capture terakhir (buat thumbnail galeri)
 let currentCaptureSaved = false; // true kalau capture yang aktif sekarang sudah pernah di-save
 let currentCaptureSavedAs = null; // nama file terakhir dari capture yang aktif sekarang
+let isCameraConnected = false; // dipakai checkCameraStatus() buat deteksi kamera dicabut fisik
 
 function showToast(message) {
   toast.textContent = message;
@@ -88,11 +89,36 @@ async function connectCamera() {
     streamBody.innerHTML = '<img src="/stream" alt="stream" />';
     btnCapture.disabled = false;
     btnCameraSettings.disabled = false;
+    isCameraConnected = true;
   } else {
     cameraDot.className = "dot dot-off";
     cameraLabel.textContent = "Gagal menghubungkan kamera";
     btnCameraSettings.disabled = true;
+    isCameraConnected = false;
     showToast(data.message || "Tidak bisa membuka kamera index " + index);
+  }
+}
+
+function handleCameraDisconnected() {
+  isCameraConnected = false;
+  cameraDot.className = "dot dot-off";
+  cameraLabel.textContent = "Kamera terputus (dicabut?)";
+  streamBody.innerHTML =
+    '<span class="placeholder-text">Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop untuk memulai</span>';
+  btnCapture.disabled = true;
+  btnCameraSettings.disabled = true;
+  showToast("Koneksi ke kamera terputus. Cek kabel USB, lalu klik Hubungkan lagi.");
+}
+
+async function checkCameraStatus() {
+  if (!isCameraConnected) return; // nggak perlu polling kalau memang belum/nggak lagi connect
+  try {
+    const res = await fetch("/api/camera/status");
+    const data = await res.json();
+    if (!data.connected) handleCameraDisconnected();
+  } catch (e) {
+    // Abaikan error jaringan sesaat, biar nggak salah nganggep disconnect
+    // gara-gara satu request gagal doang.
   }
 }
 
@@ -285,3 +311,4 @@ btnCloseSummary.addEventListener("click", () => {
 patientNameInput.addEventListener("input", updateSaveButtonState);
 
 loadCameras();
+setInterval(checkCameraStatus, 2000);

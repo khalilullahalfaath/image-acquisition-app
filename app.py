@@ -27,6 +27,9 @@ FOCUS_BLUR_THRESHOLD = 60.0
 
 # untuk deteksi objek tidak ada
 BLANK_STD_THRESHOLD = 5.0
+
+# Berapa kali read() OpenCV boleh gagal berturut-turut sebelum dianggap
+OPENCV_DISCONNECT_THRESHOLD = 15
 LOG_FILENAME = "capture_log.csv"
 
 
@@ -110,6 +113,12 @@ class CameraManager:
         self._tc_height = 0
         self._tc_connected = False
         self._tc_last_pull = 0.0
+
+        # State khusus backend OpenCV -- cv2.VideoCapture.isOpened() TIDAK
+        # otomatis jadi False cuma karena kameranya dicabut fisik; harus
+        # dideteksi lewat read() yang gagal berkali-kali berturut-turut.
+        self._opencv_connected = False
+        self._opencv_read_failures = 0
 
     def list_cameras(self, max_index=5):
         """Daftar kamera yang tersedia, gabungan SDK vendor ToupCam (kalau ada
@@ -228,6 +237,8 @@ class CameraManager:
         actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.cap = cap
         self.backend = "opencv"
+        self._opencv_connected = True
+        self._opencv_read_failures = 0
         return {"ok": True, "width": actual_w, "height": actual_h}
 
     def _open_toupcam_locked(self, cam_id, width, height):
@@ -335,7 +346,9 @@ class CameraManager:
                 print(f"[DEBUG] ToupCam PullImageV4 gagal: {e}")
         elif nEvent in (sdk.TOUPCAM_EVENT_DISCONNECTED, sdk.TOUPCAM_EVENT_ERROR):
             print(f"[DEBUG] ToupCam event disconnect/error: {nEvent}")
-            self._tc_connected = False
+            with self.lock:
+                self._tc_connected = False
+                self.last_frame = None
 
     def read(self):
         with self.lock:
@@ -347,7 +360,13 @@ class CameraManager:
                 return None
             ok, frame = self.cap.read()
             if not ok:
+                self._opencv_read_failures += 1
+                if self._opencv_read_failures >= OPENCV_DISCONNECT_THRESHOLD:
+                    self._opencv_connected = False
+                    self.last_frame = None
                 return None
+            self._opencv_read_failures = 0
+            self._opencv_connected = True
             self.last_frame = frame
             return frame
 
@@ -362,7 +381,7 @@ class CameraManager:
     def is_connected(self):
         if self.backend == "toupcam":
             return self._tc_handle is not None and self._tc_connected
-        return self.cap is not None and self.cap.isOpened()
+        return self.cap is not None and self.cap.isOpened() and self._opencv_connected
 
     def open_settings_dialog(self):
         """Buka dialog properti bawaan driver DirectShow kamera (kalau didukung).
