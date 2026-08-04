@@ -85,6 +85,7 @@ class CameraManager:
         self._tc_width = 0
         self._tc_height = 0
         self._tc_connected = False
+        self._tc_last_pull = 0.0
 
     def list_cameras(self, max_index=5):
         """Daftar kamera yang tersedia, gabungan SDK vendor ToupCam (kalau ada
@@ -230,6 +231,12 @@ class CameraManager:
                 print(f"[DEBUG] ToupCam put_Size gagal (lanjut pakai resolusi default): {e}")
 
         try:
+            # RealTime = SDK selalu kirim frame TERBARU dan buang backlog,
+            h.put_RealTime(1)
+        except Exception:
+            pass
+
+        try:
             w, ht = h.get_Size()
         except Exception as e:
             try:
@@ -244,6 +251,7 @@ class CameraManager:
         self._tc_width = w
         self._tc_height = ht
         self._tc_connected = True
+        self._tc_last_pull = 0.0
         self.backend = "toupcam"
 
         try:
@@ -270,6 +278,11 @@ class CameraManager:
         if sdk is None:
             return
         if nEvent == sdk.TOUPCAM_EVENT_IMAGE:
+            # Throttle ke ~20fps.
+            now = time.monotonic()
+            if now - self._tc_last_pull < 0.05:
+                return
+            self._tc_last_pull = now
             try:
                 with self.lock:
                     if self._tc_handle is None:
