@@ -9,6 +9,7 @@ Lalu buka http://127.0.0.1:5000 di browser.
 import base64
 import csv
 import os
+import platform
 import re
 import sys
 import threading
@@ -37,10 +38,25 @@ LOG_FILENAME = "capture_log.csv"
 # `uvcvideo` standar -- di beberapa board (mis. NVIDIA Jetson) device-nya
 # kebaca di level USB tapi gagal dapat /dev/videoN sama sekali. SDK vendor
 # (komunikasi langsung ke USB lewat libusb, bypass uvcvideo/V4L2) berhasil
-# baca kameranya. Ini loader lazy buat SDK itu, ditaruh di vendor/toupcam/.
+# baca kameranya. Ini loader lazy buat SDK itu.
+#
+# libtoupcam.so adalah biner native per-arsitektur CPU, jadi dibundel
+# per-arsitektur di vendor/toupcam/<arch>/ (masing-masing juga bawa salinan
+# toupcam.py sendiri, karena binding-nya cari .so di folder yang sama
+# persis dengan dirinya). Arsitektur dideteksi otomatis lewat
+# platform.machine() -- tinggal tambah folder arch baru kalau nanti perlu
+# platform lain (mis. armhf untuk Raspberry Pi 32-bit).
+#
 # Cuma dicoba di Linux -- di Windows OpenCV+DirectShow sudah cukup, jadi
 # tidak diutak-atik supaya tidak menambah risiko regresi di sana.
 _toupcam_sdk_cache = {"loaded": False, "module": None}
+
+_TOUPCAM_ARCH_MAP = {
+    "aarch64": "arm64",
+    "arm64": "arm64",
+    "x86_64": "x64",
+    "amd64": "x64",
+}
 
 
 def _load_toupcam_sdk():
@@ -49,7 +65,15 @@ def _load_toupcam_sdk():
     _toupcam_sdk_cache["loaded"] = True
     if os.name != "posix":
         return None
-    vendor_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toupcam")
+
+    arch_dir = _TOUPCAM_ARCH_MAP.get(platform.machine().lower())
+    if arch_dir is None:
+        print(f"[DEBUG] ToupCam SDK: arsitektur '{platform.machine()}' belum didukung/dibundel.")
+        return None
+
+    vendor_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "vendor", "toupcam", arch_dir
+    )
     if not os.path.isfile(os.path.join(vendor_dir, "libtoupcam.so")):
         return None
     try:
