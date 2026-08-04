@@ -20,7 +20,13 @@ Aplikasi ini bisa jalan di **Windows** atau **Ubuntu/Linux**.
   sudo apt install python3-venv python3-tk v4l-utils
   ```
   `python3-tk` dibutuhkan buat dialog pilih folder, `v4l-utils` buat cek kamera (`v4l2-ctl --list-devices`).
-- Kamera mikroskop USB: kalau kameranya UVC-compliant (kebanyakan kamera mikroskop USB termasuk MiiCam biasanya begitu), Ubuntu biasanya langsung mendeteksinya lewat driver V4L2 bawaan kernel -- tidak perlu install driver tambahan seperti di Windows. Colok kameranya, lalu cek dengan `v4l2-ctl --list-devices` atau `ls /dev/video*` untuk pastikan sudah terbaca.
+- Kamera mikroskop USB: kalau kameranya UVC-compliant, Ubuntu biasanya langsung mendeteksinya lewat driver V4L2 bawaan kernel -- tidak perlu install driver tambahan seperti di Windows. Colok kameranya, lalu cek dengan `v4l2-ctl --list-devices` atau `ls /dev/video*` untuk pastikan sudah terbaca.
+- **Kamera MiiCam khususnya** ternyata tidak selalu bisa di-bind driver kernel `uvcvideo` standar di semua board (mis. NVIDIA Jetson) -- aplikasi ini otomatis fallback pakai **SDK vendor ToupCam** (dibundel di `vendor/toupcam/`) kalau itu terjadi. SDK ini butuh udev rule supaya bisa diakses tanpa root; `run.sh` akan menawarkan install otomatis, atau manual:
+  ```
+  sudo cp vendor/toupcam/99-toupcam.rules /etc/udev/rules.d/
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  ```
+  Lalu cabut-colok ulang kameranya.
 
 ## Cara menjalankan
 
@@ -82,6 +88,11 @@ thalassemia-capture-app/
 ├── run.bat                 # Runner otomatis untuk Windows
 ├── run.sh                  # Runner otomatis untuk Ubuntu/Linux
 ├── check_cameras.py        # Skrip diagnostik kamera (opsional, buat debug)
+├── vendor/
+│   └── toupcam/             # SDK vendor ToupCam (Linux arm64) -- fallback kalau uvcvideo gagal bind
+│       ├── toupcam.py
+│       ├── libtoupcam.so
+│       └── 99-toupcam.rules
 ├── templates/
 │   └── index.html
 └── static/
@@ -111,3 +122,9 @@ thalassemia-capture-app/
 
 **Ubuntu: kamera tidak bisa dibuka meski muncul di `v4l2-ctl --list-devices` (Permission denied)**
 - User belum masuk grup `video`: `sudo usermod -aG video $USER`, lalu logout/login ulang.
+
+**Ubuntu/Jetson: MiiCam kebaca di `lsusb` tapi tidak muncul di `v4l2-ctl --list-devices`**
+- Ini kasus yang butuh SDK vendor ToupCam (lihat bagian Persyaratan di atas). Aplikasi otomatis coba backend ini duluan sebelum fallback ke V4L2 -- kalau kamera tetap tidak muncul di dropdown aplikasi, cek:
+  1. Udev rule sudah terinstall (`ls /etc/udev/rules.d/99-toupcam.rules`) dan kamera sudah dicabut-colok ulang setelahnya.
+  2. Konsol server (`python app.py`) menampilkan baris `[DEBUG] ToupCam EnumV2 gagal: ...` atau `[DEBUG] ToupCam SDK gagal dimuat: ...` -- pesan errornya biasanya menunjukkan penyebabnya (mis. arsitektur `.so` tidak cocok, `libtoupcam.so` tidak ditemukan).
+  3. Untuk board selain ARM64 (mis. Ubuntu x86_64 biasa), perlu ganti `vendor/toupcam/libtoupcam.so` dengan versi arsitektur yang sesuai dari ToupCamSDK (folder `linux/x64/` di paket SDK).

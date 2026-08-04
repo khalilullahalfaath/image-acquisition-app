@@ -3,6 +3,7 @@ const cameraLabel = document.getElementById("cameraLabel");
 const cameraSelect = document.getElementById("cameraSelect");
 const resolutionSelect = document.getElementById("resolutionSelect");
 const btnConnectCamera = document.getElementById("btnConnectCamera");
+const btnCameraSettings = document.getElementById("btnCameraSettings");
 
 const btnCapture = document.getElementById("btnCapture");
 const btnFolder = document.getElementById("btnFolder");
@@ -86,11 +87,33 @@ async function connectCamera() {
     cameraLabel.textContent = "Aktif: " + selectedName + resText;
     streamBody.innerHTML = '<img src="/stream" alt="stream" />';
     btnCapture.disabled = false;
+    btnCameraSettings.disabled = false;
   } else {
     cameraDot.className = "dot dot-off";
     cameraLabel.textContent = "Gagal menghubungkan kamera";
-    showToast("Tidak bisa membuka kamera index " + index);
+    btnCameraSettings.disabled = true;
+    showToast(data.message || "Tidak bisa membuka kamera index " + index);
   }
+}
+
+async function openCameraSettings() {
+  btnCameraSettings.disabled = true;
+  btnCameraSettings.textContent = "Menunggu dialog ditutup...";
+  const res = await fetch("/api/camera/settings", { method: "POST" });
+  const data = await res.json();
+  btnCameraSettings.disabled = false;
+  btnCameraSettings.textContent = "Pengaturan Driver";
+
+  if (!data.ok) {
+    showToast(data.message || "Gagal membuka dialog pengaturan kamera.");
+    return;
+  }
+  const selectedName = cameraSelect.options[cameraSelect.selectedIndex]
+    ? cameraSelect.options[cameraSelect.selectedIndex].text
+    : "";
+  const resText = data.width && data.height ? ` (${data.width}x${data.height})` : "";
+  cameraLabel.textContent = "Aktif: " + selectedName + resText;
+  showToast("Resolusi kamera saat ini: " + data.width + "x" + data.height);
 }
 
 async function doCapture() {
@@ -250,6 +273,7 @@ async function doSave() {
 }
 
 btnConnectCamera.addEventListener("click", connectCamera);
+btnCameraSettings.addEventListener("click", openCameraSettings);
 btnCapture.addEventListener("click", doCapture);
 btnFolder.addEventListener("click", doSelectFolder);
 btnSave.addEventListener("click", doSave);

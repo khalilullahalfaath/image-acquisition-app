@@ -36,6 +36,29 @@ source venv/bin/activate
 echo "Menginstall/memperbarui dependency dari requirements.txt..."
 pip install -q -r requirements.txt
 
+# Kamera vendor seperti MiiCam butuh udev rule ini biar bisa diakses tanpa
+# root lewat SDK ToupCam (lihat vendor/toupcam/). Cuma jalan sekali; kalau
+# rule-nya sudah ada, dilewati.
+UDEV_RULE_SRC="vendor/toupcam/99-toupcam.rules"
+UDEV_RULE_DST="/etc/udev/rules.d/99-toupcam.rules"
+if [ -f "$UDEV_RULE_SRC" ] && [ ! -f "$UDEV_RULE_DST" ]; then
+    echo ""
+    echo "Kamera vendor (mis. MiiCam) butuh udev rule supaya bisa diakses tanpa root."
+    read -p "Install udev rule sekarang? Butuh sudo. (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if sudo cp "$UDEV_RULE_SRC" "$UDEV_RULE_DST" && sudo udevadm control --reload-rules && sudo udevadm trigger; then
+            echo "udev rule terinstall. Cabut-colok ulang kameranya supaya permission baru berlaku."
+        else
+            echo "Gagal install udev rule -- bisa dicoba manual nanti:"
+            echo "  sudo cp $UDEV_RULE_SRC $UDEV_RULE_DST && sudo udevadm control --reload-rules && sudo udevadm trigger"
+        fi
+    else
+        echo "Dilewati. Bisa diinstall manual nanti kalau kamera vendor tidak terbaca:"
+        echo "  sudo cp $UDEV_RULE_SRC $UDEV_RULE_DST && sudo udevadm control --reload-rules && sudo udevadm trigger"
+    fi
+fi
+
 # Buka browser otomatis setelah server sempat start (jalan di background,
 # tidak menghalangi server utama).
 ( sleep 2 && (xdg-open "http://127.0.0.1:5000" >/dev/null 2>&1 || true) ) &
