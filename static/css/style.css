@@ -308,6 +308,22 @@ body {
 }
 .seg-overlay-wrap.seg-add-mode-active svg polygon { cursor: crosshair; }
 .seg-overlay-wrap svg polygon.seg-polygon-active { stroke-width: 4; }
+.seg-overlay-wrap svg polygon.seg-polygon-dimmed { opacity: 0.15; }
+.seg-overlay-wrap svg text.seg-cell-number-label.seg-label-dimmed { opacity: 0.15; }
+
+.seg-total-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  background: rgba(15, 23, 42, 0.72);
+  color: var(--white);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+}
 
 .seg-image-tabs { display: flex; gap: 6px; align-items: center; }
 .seg-list-refresh { margin-left: auto; }
@@ -461,8 +477,6 @@ body {
   color: var(--slate-800);
   cursor: pointer;
 }
-.seg-tools-right { display: flex; align-items: center; gap: 16px; }
-.seg-total-count { font-size: 12px; font-weight: 600; color: var(--slate-800); }
 .seg-zoom-controls { display: flex; align-items: center; gap: 6px; }
 .seg-zoom-label { font-size: 12px; color: var(--slate-500); min-width: 38px; text-align: center; }
 
@@ -477,6 +491,25 @@ body {
   overflow: hidden;
 }
 .seg-class-bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s ease; }
+.seg-class-clickable { cursor: pointer; }
+.seg-class-summary-row.seg-class-row-active { background: var(--blue-50); border-radius: 6px; }
+.seg-class-bar-track.seg-class-row-active { outline: 2px solid var(--blue-600); outline-offset: 1px; }
+
+.seg-result-list-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.seg-result-list-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seg-result-list-file {
+  font-size: 10px;
+  color: var(--slate-400);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Elemen gambar (img polos di segSourceBody / .seg-overlay-wrap di
    segResultBody) yang kena transform zoom+pan lewat JS -- overflow:hidden

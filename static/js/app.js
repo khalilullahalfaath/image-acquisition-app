@@ -26,7 +26,6 @@ const btnSegZoomIn = document.getElementById("btnSegZoomIn");
 const btnSegZoomOut = document.getElementById("btnSegZoomOut");
 const btnSegZoomReset = document.getElementById("btnSegZoomReset");
 const segZoomLabel = document.getElementById("segZoomLabel");
-const segTotalCellCount = document.getElementById("segTotalCellCount");
 const btnSegPatientSummary = document.getElementById("btnSegPatientSummary");
 const segPatientSummaryBody = document.getElementById("segPatientSummaryBody");
 const btnSegBatchRun = document.getElementById("btnSegBatchRun");
@@ -85,6 +84,7 @@ let segImgH = 0;
 let segActiveFolder = null; // folder "aktif" buat Ringkasan per Pasien & Muat Daftar -- dari gambar terakhir dipilih/dimuat ATAU folder Proses Batch terakhir
 let segActiveCellId = null; // id sel yang lagi dipilih (row diklik / navigasi panah)
 let segAddMode = false; // true kalau lagi mode "Tambah Sel Manual"
+let segHighlightedClassIndex = null; // kelas yang lagi di-highlight (klik baris/bar di ringkasan kelas)
 let segSelectedCellIds = new Set(); // dipakai buat koreksi kelas massal (bulk)
 let segResultsListCache = []; // cache hasil terakhir dari list-results, buat filter tanpa fetch ulang
 
@@ -477,24 +477,60 @@ async function loadClassLegend() {
 
 // counts === null -> tampilan awal (belum ada hasil, semua "-")
 function renderClassSummary(counts) {
+  if (!counts) segHighlightedClassIndex = null; // reset kalau panel di-clear (belum ada hasil)
   const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   classSummaryBody.innerHTML = segClassLabels
     .map((c) => {
       const count = counts ? counts[c.label] ?? 0 : null;
       const pct = counts && total > 0 ? (count / total) * 100 : 0;
       const pctText = counts ? pct.toFixed(1) + "%" : "";
+      // Baris & bar cuma bisa diklik kalau sudah ada hasil (counts != null) --
+      // klik toggle highlight kelas itu di overlay gambar (lihat toggleClassHighlight).
+      const clickable = counts ? " seg-class-clickable" : "";
+      const active = counts && segHighlightedClassIndex === c.index ? " seg-class-row-active" : "";
       return `
-        <div class="summary-row seg-class-summary-row">
+        <div class="summary-row seg-class-summary-row${clickable}${active}" data-class-index="${c.index}">
           <span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span>
           <span class="seg-class-summary-stats">
             <span>${count === null ? "&ndash;" : count}</span>
             ${counts ? `<span class="seg-class-pct">(${pctText})</span>` : ""}
           </span>
         </div>
-        <div class="seg-class-bar-track"><div class="seg-class-bar-fill" style="width:${pct}%;background:${c.color}"></div></div>
+        <div class="seg-class-bar-track${clickable}${active}" data-class-index="${c.index}"><div class="seg-class-bar-fill" style="width:${pct}%;background:${c.color}"></div></div>
       `;
     })
     .join("");
+
+  if (counts) {
+    classSummaryBody.querySelectorAll(".seg-class-clickable").forEach((el) => {
+      el.addEventListener("click", () => toggleClassHighlight(parseInt(el.dataset.classIndex, 10)));
+    });
+  }
+}
+
+// Klik baris/bar kelas di ringkasan -> highlight (dim yang lain) sel kelas
+// itu di overlay Hasil Segmentasi. Klik lagi kelas yang sama -> matikan lagi.
+function toggleClassHighlight(classIndex) {
+  segHighlightedClassIndex = segHighlightedClassIndex === classIndex ? null : classIndex;
+  classSummaryBody.querySelectorAll("[data-class-index]").forEach((el) => {
+    el.classList.toggle("seg-class-row-active", parseInt(el.dataset.classIndex, 10) === segHighlightedClassIndex);
+  });
+  applySegClassHighlightToOverlay();
+}
+
+function applySegClassHighlightToOverlay() {
+  const svg = segResultBody.querySelector("svg");
+  if (!svg) return;
+  svg.querySelectorAll("polygon[data-cell-id]").forEach((p) => {
+    const det = segDetections.find((d) => d.id === parseInt(p.dataset.cellId, 10));
+    const idx = det ? currentClassIndex(det) : null;
+    p.classList.toggle("seg-polygon-dimmed", segHighlightedClassIndex !== null && idx !== segHighlightedClassIndex);
+  });
+  svg.querySelectorAll("text.seg-cell-number-label").forEach((t) => {
+    const det = segDetections.find((d) => d.id === parseInt(t.dataset.cellId, 10));
+    const idx = det ? currentClassIndex(det) : null;
+    t.classList.toggle("seg-label-dimmed", segHighlightedClassIndex !== null && idx !== segHighlightedClassIndex);
+  });
 }
 
 function updateClassSummaryFromDetections() {
@@ -705,7 +741,7 @@ function setActiveCell(cellId) {
 
 function resetSegmentationResults() {
   segDetections = [];
-  updateSegTotalCellCount();
+  segHighlightedClassIndex = null;
   segActiveCellId = null;
   segAddMode = false;
   segSelectedCellIds = new Set();
@@ -761,6 +797,7 @@ function applyLoadedSegmentationResult(data) {
   }));
   segActiveCellId = null;
   segAddMode = false;
+  segHighlightedClassIndex = null;
   segSelectedCellIds = new Set();
   segSelectAllCells.checked = false;
   btnSegAddCell.classList.remove("btn-toggle-active");
@@ -891,23 +928,16 @@ function renderSegmentationOverlay() {
   });
   segResultBody.innerHTML = `
     <div class="seg-overlay-wrap">
+      <div class="seg-total-badge">${segDetections.length} sel terdeteksi</div>
       <img src="${segCurrentImageDataUrl}" alt="hasil segmentasi" />
       <svg viewBox="0 0 ${segImgW} ${segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}${labels}</svg>
     </div>
   `;
   applySegZoomTransform();
-}
-
-// Dipanggil tiap kali segDetections berubah (lewat renderDetectionsList,
-// atau manual di resetSegmentationResults) -- biar "Total sel terdeteksi"
-// di seg-tools-row selalu konsisten sama daftar & overlay.
-function updateSegTotalCellCount() {
-  segTotalCellCount.textContent =
-    segDetections.length > 0 ? `Total sel terdeteksi: ${segDetections.length}` : "";
+  applySegClassHighlightToOverlay();
 }
 
 function renderDetectionsList() {
-  updateSegTotalCellCount();
   const detectionsTabActive = segTabDetections.classList.contains("seg-image-tab-active");
   segBulkActionsBar.classList.toggle("view-hidden", segDetections.length === 0 || !detectionsTabActive);
   if (segDetections.length === 0) {
@@ -1040,6 +1070,7 @@ async function doRunSegmentation() {
   }));
   segActiveCellId = null;
   segAddMode = false;
+  segHighlightedClassIndex = null;
   segSelectedCellIds = new Set();
   segSelectAllCells.checked = false;
   btnSegAddCell.classList.remove("btn-toggle-active");
@@ -1163,9 +1194,19 @@ function renderSegResultsList(results) {
     .map((r) => {
       const filename = r.sourceImage ? r.sourceImage.split(/[\\/]/).pop() : r.detailFile;
       const patientTag = r.patientId && r.patientId !== "?" ? ` (${r.patientId})` : "";
+      // Baris kedua nunjukin nama file JSON detail aslinya (persis kayak di
+      // File Explorer/folder gambar) -- biar jelas file mana persisnya yang
+      // dipakai buat gambar ini, nggak cuma nama gambar sumbernya.
+      const fileSubtitle =
+        r.detailFile && r.detailFile !== filename
+          ? `<span class="seg-result-list-file" title="${r.detailFile}">${r.detailFile}</span>`
+          : "";
       return `
         <div class="summary-row seg-result-list-row" data-path="${r.detailPath}">
-          <span>${filename}${patientTag}</span>
+          <div class="seg-result-list-main">
+            <span class="seg-result-list-title">${filename}${patientTag}</span>
+            ${fileSubtitle}
+          </div>
           <span>${r.totalCells} sel</span>
         </div>
       `;
