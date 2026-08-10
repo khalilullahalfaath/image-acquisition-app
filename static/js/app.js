@@ -898,7 +898,13 @@ async function doSelectSegmentationImage() {
 function applyLoadedSegmentationResult(data) {
   segSelectedPath = data.path;
   if (data.path) segActiveFolder = segFolderOf(data.path);
-  segPatientNameInput.value = data.patientId || "";
+  // Hasil lama yang disimpan sebelum inisial pasien wajib/otomatis terisi
+  // bisa aja patientId-nya kosong -- coba tebak dari nama file gambar
+  // sumbernya (lihat guessPatientIdFromFilename) daripada dibiarkan kosong.
+  segPatientNameInput.value =
+    data.patientId && data.patientId !== "?"
+      ? data.patientId
+      : guessPatientIdFromFilename(data.path) || guessPatientIdFromFilename(data.detailFile);
   segImagePathEl.textContent = data.path
     ? "Gambar: " + data.path + (data.detailFile ? ` (dimuat dari ${data.detailFile})` : "")
     : `Dimuat dari ${data.detailFile} (path gambar sumber tidak tercatat)`;
