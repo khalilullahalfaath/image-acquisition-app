@@ -87,10 +87,42 @@ RBC_CLASS_COLORS = [
 # dibuat mirip capture_log.csv biar gampang dianalisis bareng.
 SEGMENTATION_LOG_FILENAME = "segmentation_log.csv"
 
+# is_duplicate/duplicate_of: ditambahkan belakangan (lihat _ensure_log_columns)
+# buat nandain kalau suatu hasil disimpan persis sama (jumlah sel per kelas +
+# total identik) dengan hasil TERAKHIR yang sudah tersimpan buat gambar yang
+# sama -- biar folder nggak numpuk file JSON duplikat tanpa keterangan.
+SEGMENTATION_LOG_FIELDNAMES = (
+    ["timestamp", "patient_id", "source_image", "detail_file", "total_cells", "is_duplicate", "duplicate_of"]
+    + RBC_CLASS_LABELS
+)
+
 # Lindungi penulisan file detail JSON + baris segmentation_log.csv dari race
 # condition kalau ada beberapa "Simpan Hasil" nyaris bersamaan -- pola yang
 # sama dengan save_lock di atas.
 segmentation_log_lock = threading.Lock()
+
+
+def _ensure_log_columns(log_path, fieldnames):
+    """Migrasi in-place kalau segmentation_log.csv yang sudah ada (dari versi
+    lama) belum punya kolom baru (mis. is_duplicate/duplicate_of) -- baca
+    semua baris lama, rewrite dengan header terbaru (kolom baru diisi kosong
+    utk baris lama), biar CSV tetap satu format konsisten & nggak ada nilai
+    ke-shift/hilang pas dibuka di Excel setelah kolom baru ditambahkan.
+    Harus dipanggil di dalam segmentation_log_lock."""
+    if not os.path.isfile(log_path):
+        return
+    with open(log_path, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        header = reader.fieldnames or []
+        rows = list(reader)
+    if not header or all(name in header for name in fieldnames):
+        return  # file kosong, atau sudah punya semua kolom yg dibutuhkan
+    with open(log_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            row.pop(None, None)  # buang overflow restkey (baris lama yg kolomnya beda)
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
 
 
 # ---------------------------------------------------------------------------
@@ -1030,6 +1062,8 @@ def api_segmentation_list_results():
             "patientId": row.get("patient_id"),
             "totalCells": row.get("total_cells"),
             "timestamp": row.get("timestamp"),
+            "isDuplicate": (row.get("is_duplicate") or "0") == "1",
+            "duplicateOfFile": row.get("duplicate_of") or None,
         }
         for row in rows
         if row.get("detail_file")
@@ -1045,11 +1079,19 @@ def api_segmentation_save():
       1. File JSON detail per-sel (mask polygon, confidence, status koreksi)
       2. Satu baris ringkasan di segmentation_log.csv (jumlah sel per kelas
          -- format kolom per kelas biar gampang dianalisis langsung di Excel)
+
+    Sebelum benar-benar nulis, dicek dulu apakah hasil ini PERSIS SAMA
+    (total sel + jumlah per kelas identik) dengan hasil TERAKHIR yang sudah
+    tersimpan buat gambar yang sama -- kalau iya dan client belum kirim
+    `force: true`, nggak jadi ditulis, cuma balikin `needsConfirmation` biar
+    frontend nanya dulu ke user (lihat doSaveSegmentation()). Ini buat
+    nyegah folder numpuk banyak file JSON isinya sama persis tanpa sadar.
     """
     data = request.json or {}
     path = (data.get("path") or "").strip()
     patient_id = (data.get("patientId") or "").strip()
     detections = data.get("detections") or []
+    force = bool(data.get("force"))
 
     if not path or not os.path.isfile(path):
         return jsonify({"ok": False, "message": "Gambar sumber tidak valid."}), 400
@@ -1058,11 +1100,57 @@ def api_segmentation_save():
 
     folder = os.path.dirname(path)
     base_name = os.path.splitext(os.path.basename(path))[0]
+    source_image_basename = os.path.basename(path)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
+    class_counts = {label: 0 for label in RBC_CLASS_LABELS}
+    for d in detections:
+        label = d.get("correctedClassLabel") or d.get("classLabel")
+        if label in class_counts:
+            class_counts[label] += 1
+
     with segmentation_log_lock:
+        log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
+        _ensure_log_columns(log_path, SEGMENTATION_LOG_FIELDNAMES)
+
+        prev_row = next(
+            (r for r in _latest_segmentation_rows(folder) if r.get("source_image") == source_image_basename),
+            None,
+        )
+        is_duplicate = False
+        duplicate_of = ""
+        if prev_row is not None:
+            try:
+                prev_total = int(prev_row.get("total_cells") or 0)
+                counts_match = all(
+                    int(prev_row.get(label) or 0) == class_counts[label] for label in RBC_CLASS_LABELS
+                )
+                is_duplicate = counts_match and prev_total == len(detections)
+            except (TypeError, ValueError):
+                is_duplicate = False
+            if is_duplicate:
+                duplicate_of = prev_row.get("detail_file") or ""
+
+        if is_duplicate and not force:
+            return jsonify({
+                "ok": True,
+                "needsConfirmation": True,
+                "isDuplicate": True,
+                "lastTimestamp": prev_row.get("timestamp"),
+                "lastDetailFile": duplicate_of,
+            })
+
         detail_filename = f"{base_name}_segmentation_{timestamp}.json"
         detail_path = os.path.join(folder, detail_filename)
+        # Timestamp cuma presisi per detik -- kalau ada dua save dalam detik
+        # yang sama (mis. warning duplikat lalu langsung "tetap simpan"),
+        # nama filenya bakal sama & nimpa file sebelumnya. Tambah suffix
+        # numerik biar tetap unik.
+        dedup_suffix = 1
+        while os.path.exists(detail_path):
+            detail_filename = f"{base_name}_segmentation_{timestamp}-{dedup_suffix}.json"
+            detail_path = os.path.join(folder, detail_filename)
+            dedup_suffix += 1
         try:
             with open(detail_path, "w", encoding="utf-8") as f:
                 json.dump({
@@ -1070,30 +1158,26 @@ def api_segmentation_save():
                     "patientId": patient_id,
                     "sourceImage": path,
                     "detections": detections,
+                    "isDuplicate": is_duplicate,
+                    "duplicateOfFile": duplicate_of or None,
                 }, f, ensure_ascii=False, indent=2)
         except OSError as e:
             return jsonify({"ok": False, "message": f"Gagal menyimpan file detail: {e}"}), 500
 
-        class_counts = {label: 0 for label in RBC_CLASS_LABELS}
-        for d in detections:
-            label = d.get("correctedClassLabel") or d.get("classLabel")
-            if label in class_counts:
-                class_counts[label] += 1
-
-        log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
         is_new = not os.path.exists(log_path)
-        fieldnames = ["timestamp", "patient_id", "source_image", "detail_file", "total_cells"] + RBC_CLASS_LABELS
         row = {
             "timestamp": timestamp,
             "patient_id": patient_id or "?",
-            "source_image": os.path.basename(path),
+            "source_image": source_image_basename,
             "detail_file": detail_filename,
             "total_cells": len(detections),
+            "is_duplicate": "1" if is_duplicate else "0",
+            "duplicate_of": duplicate_of,
             **class_counts,
         }
         try:
             with open(log_path, "a", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer = csv.DictWriter(f, fieldnames=SEGMENTATION_LOG_FIELDNAMES)
                 if is_new:
                     writer.writeheader()
                 writer.writerow(row)
@@ -1105,6 +1189,7 @@ def api_segmentation_save():
         "detailPath": detail_path,
         "logPath": log_path,
         "totalCells": len(detections),
+        "isDuplicate": is_duplicate,
     })
 
 
@@ -1176,8 +1261,8 @@ def api_segmentation_batch_run():
 
     with segmentation_log_lock:
         log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
+        _ensure_log_columns(log_path, SEGMENTATION_LOG_FIELDNAMES)
         is_new_log = not os.path.exists(log_path)
-        fieldnames = ["timestamp", "patient_id", "source_image", "detail_file", "total_cells"] + RBC_CLASS_LABELS
 
         if skip_existing and os.path.isfile(log_path):
             try:
@@ -1236,11 +1321,13 @@ def api_segmentation_batch_run():
                 "source_image": fname,
                 "detail_file": detail_filename,
                 "total_cells": len(detections),
+                "is_duplicate": "0",  # batch selalu jalankan segmentasi baru, nggak dicek duplikat
+                "duplicate_of": "",
                 **class_counts,
             }
             try:
                 with open(log_path, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer = csv.DictWriter(f, fieldnames=SEGMENTATION_LOG_FIELDNAMES)
                     if is_new_log:
                         writer.writeheader()
                         is_new_log = False
@@ -1365,7 +1452,14 @@ def api_segmentation_patient_summary():
 def _latest_segmentation_rows(folder):
     """Baca segmentation_log.csv di satu folder, dedup ambil baris TERBARU
     per source_image -- helper yang sama dipakai /list-results dan
-    /patient-summary, dipusatkan di sini juga buat /export-report."""
+    /patient-summary, dipusatkan di sini juga buat /export-report.
+
+    Kalau dua baris punya timestamp yang PERSIS sama (resolusi timestamp
+    cuma per detik, bisa kejadian kalau ada save cepat berturut-turut,
+    mis. warning duplikat lalu "tetap simpan"), baris yang lebih BELAKANGAN
+    di file (ditulis lebih baru) yang menang -- makanya perbandingannya
+    `>` bukan `>=`, biar baris lama nggak "menang" cuma gara-gara duluan
+    ditulis di file."""
     log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
     if not os.path.isfile(log_path):
         return []
@@ -1377,7 +1471,7 @@ def _latest_segmentation_rows(folder):
                 continue
             ts = row.get("timestamp") or ""
             existing = latest_by_image.get(si)
-            if existing is not None and existing.get("timestamp", "") >= ts:
+            if existing is not None and existing.get("timestamp", "") > ts:
                 continue
             latest_by_image[si] = row
     return list(latest_by_image.values())

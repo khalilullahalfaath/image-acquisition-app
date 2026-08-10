@@ -437,6 +437,14 @@ body {
   border-radius: 4px;
   margin-left: 6px;
 }
+.seg-duplicate-tag {
+  font-size: 10px;
+  background: #ffedd5;
+  color: #9a3412;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
 .seg-row-low-confidence { border-left: 3px solid var(--red-500); padding-left: 6px; }
 
 .seg-row-controls { display: flex; gap: 6px; align-items: center; }
@@ -483,17 +491,11 @@ body {
 .seg-class-summary-row { align-items: center; }
 .seg-class-summary-stats { display: flex; align-items: center; gap: 6px; }
 .seg-class-pct { color: var(--slate-500); font-size: 12px; min-width: 44px; text-align: right; }
-.seg-class-bar-track {
-  height: 6px;
-  background: var(--slate-100);
-  border-radius: 3px;
-  margin: 0 0 8px;
-  overflow: hidden;
-}
-.seg-class-bar-fill { height: 100%; border-radius: 3px; transition: width 0.2s ease; }
 .seg-class-clickable { cursor: pointer; }
 .seg-class-summary-row.seg-class-row-active { background: var(--blue-50); border-radius: 6px; }
-.seg-class-bar-track.seg-class-row-active { outline: 2px solid var(--blue-600); outline-offset: 1px; }
+
+.seg-class-chart-svg { width: 100%; height: 320px; }
+.seg-class-chart-bar-group rect.seg-class-bar-active { stroke: var(--blue-600); stroke-width: 2; }
 
 .seg-result-list-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .seg-result-list-title {
