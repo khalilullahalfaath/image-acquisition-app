@@ -312,7 +312,7 @@ body {
 .seg-overlay-wrap svg text.seg-cell-number-label.seg-label-dimmed { opacity: 0.15; }
 
 .seg-image-tabs { display: flex; gap: 6px; align-items: center; }
-.seg-total-count { font-size: 12px; font-weight: 600; color: var(--slate-500); margin-left: 2px; }
+.seg-total-count { font-size: 12px; font-weight: 600; color: var(--slate-500); margin-left: auto; }
 .seg-list-refresh { margin-left: auto; }
 .seg-image-tab {
   font-size: 12px;

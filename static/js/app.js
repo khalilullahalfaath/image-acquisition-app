@@ -1058,7 +1058,8 @@ function renderSegmentationOverlay() {
 // Dipanggil tiap kali segDetections berubah -- biar jumlah sel di samping
 // tombol "Hasil Segmentasi" selalu konsisten sama daftar sel & overlay.
 function updateSegTotalCellCount() {
-  segTotalCellCount.textContent = segDetections.length > 0 ? `(${segDetections.length} sel)` : "";
+  segTotalCellCount.textContent =
+    segDetections.length > 0 ? `Jumlah sel terdeteksi: ${segDetections.length} sel` : "";
 }
 
 function renderDetectionsList() {
