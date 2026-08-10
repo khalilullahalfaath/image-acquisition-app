@@ -8,8 +8,11 @@ Lalu buka http://127.0.0.1:5000 di browser.
 
 import base64
 import csv
+import json
+import math
 import os
 import platform
+import random
 import re
 import sys
 import threading
@@ -38,6 +41,56 @@ LOG_FILENAME = "capture_log.csv"
 # baca "iterasi berikutnya" yang sama sebelum salah satu selesai menulis,
 # jadi filename ketimpa/duplikat atau baris CSV keselip.
 save_lock = threading.Lock()
+
+# Label kelas morfologi sel eritrosit untuk tab Segmentasi & Klasifikasi.
+# Urutan index di sini PENTING -- ini bakal jadi mapping output model
+# klasifikasi (deep learning) begitu pipeline-nya dipasang, jadi jangan
+# diubah urutannya tanpa nyesuaikan juga di sisi model/training nanti.
+RBC_CLASS_LABELS = [
+    "Normal cell",
+    "Macrocyte",
+    "Microcyte",
+    "Spherocyte",
+    "Target cell",
+    "Stomatocyte",
+    "Ovalocyte",
+    "Teardrop",
+    "Burr cell",
+    "Schistocyte",
+    "Uncategorised",
+    "Hypochromia",
+    "Elliptocyte",
+]
+
+# Warna tampilan per kelas (dipakai buat overlay & legenda di frontend) --
+# ditaruh satu sumber di backend biar konsisten kalau nanti dipakai juga di
+# skrip training/evaluasi (mis. visualisasi confusion matrix per warna kelas
+# yang sama).
+RBC_CLASS_COLORS = [
+    "#16a34a",  # Normal cell
+    "#2563eb",  # Macrocyte
+    "#f59e0b",  # Microcyte
+    "#db2777",  # Spherocyte
+    "#7c3aed",  # Target cell
+    "#0891b2",  # Stomatocyte
+    "#ea580c",  # Ovalocyte
+    "#65a30d",  # Teardrop
+    "#dc2626",  # Burr cell
+    "#9333ea",  # Schistocyte
+    "#64748b",  # Uncategorised
+    "#ca8a04",  # Hypochromia
+    "#0d9488",  # Elliptocyte
+]
+
+# File ringkasan hasil segmentasi (satu baris per proses "Simpan Hasil"),
+# ditulis di folder yang sama dengan gambar sumbernya -- polanya sengaja
+# dibuat mirip capture_log.csv biar gampang dianalisis bareng.
+SEGMENTATION_LOG_FILENAME = "segmentation_log.csv"
+
+# Lindungi penulisan file detail JSON + baris segmentation_log.csv dari race
+# condition kalau ada beberapa "Simpan Hasil" nyaris bersamaan -- pola yang
+# sama dengan save_lock di atas.
+segmentation_log_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +746,782 @@ def api_folder_summary():
         "totalPatients": len(summary),
         "totalFiles": sum(counts.values()),
     })
+
+
+def generate_mock_instance_segmentation(frame):
+    """PLACEHOLDER -- BUKAN model beneran.
+
+    Rencananya di sini nanti dipasang inference Mask R-CNN/Detectron2 yang
+    dilatih dari RBC Chula dataset. Buat sekarang, fungsi ini menghasilkan
+    deteksi instance segmentation dummy (blob mirip lingkaran + kelas acak)
+    supaya seluruh alur UI (overlay per kelas, daftar per-sel, koreksi
+    manual, simpan hasil) bisa dibangun & dites end-to-end lebih dulu.
+
+    Kontrak return-nya (list of dict dengan key classIndex/classLabel/
+    confidence/bbox/mask) dipertahankan supaya nanti tinggal ganti ISI
+    fungsi ini jadi manggil inference model beneran, tanpa perlu ubah kode
+    di route atau di frontend.
+    """
+    h, w = frame.shape[:2]
+    n_cells = random.randint(12, 24)
+    detections = []
+
+    # Bobot supaya "Normal cell" (index 0) lebih sering muncul, kira-kira
+    # mirip proporsi asli di citra apusan darah (mayoritas sel normal).
+    weights = [40] + [5] * (len(RBC_CLASS_LABELS) - 1)
+
+    min_r = max(6, int(min(w, h) * 0.02))
+    max_r = max(min_r + 4, int(min(w, h) * 0.045))
+
+    for i in range(n_cells):
+        cx = random.randint(max_r, max(max_r + 1, w - max_r))
+        cy = random.randint(max_r, max(max_r + 1, h - max_r))
+        r = random.randint(min_r, max_r)
+        class_index = random.choices(range(len(RBC_CLASS_LABELS)), weights=weights, k=1)[0]
+        confidence = round(random.uniform(0.55, 0.98), 3)
+
+        # Bentuk mask sebagai polygon (bukan lingkaran sempurna, dikasih
+        # noise dikit di radius) -- ini format yang sama dipakai instance
+        # segmentation beneran (polygon per instance, gaya COCO).
+        n_points = 16
+        points = []
+        for p in range(n_points):
+            angle = 2 * math.pi * p / n_points
+            rr = r * random.uniform(0.85, 1.1)
+            points.append([
+                round(cx + rr * math.cos(angle), 1),
+                round(cy + rr * math.sin(angle), 1),
+            ])
+
+        bbox_x = max(0, cx - r)
+        bbox_y = max(0, cy - r)
+        detections.append({
+            "id": i,
+            "classIndex": class_index,
+            "classLabel": RBC_CLASS_LABELS[class_index],
+            "confidence": confidence,
+            "bbox": [bbox_x, bbox_y, min(2 * r, w - bbox_x), min(2 * r, h - bbox_y)],
+            "mask": points,
+        })
+    return detections
+
+
+# ---------------------------------------------------------------------------
+# Routes - segmentasi & klasifikasi morfologi sel
+# ---------------------------------------------------------------------------
+# Scaffold UI + hasil DUMMY dulu -- model instance segmentation beneran
+# (rencana: Mask R-CNN/Detectron2, dilatih dari RBC Chula dataset) belum
+# dilatih/dipasang. Kontrak response endpoint-endpoint ini sudah dirancang
+# final (bukan sekadar placeholder acak) supaya begitu model beneran
+# dipasang, frontend nggak perlu diubah lagi.
+@app.route("/api/segmentation/classes")
+def api_segmentation_classes():
+    return jsonify([
+        {"index": i, "label": label, "color": RBC_CLASS_COLORS[i]}
+        for i, label in enumerate(RBC_CLASS_LABELS)
+    ])
+
+
+@app.route("/api/segmentation/select-image", methods=["POST"])
+def api_segmentation_select_image():
+    """Buka dialog pilih file gambar NATIVE lewat tkinter, baca isinya, dan
+    kirim balik sebagai base64 buat preview (konsisten dengan pola
+    /api/capture yang sudah ada -- bukan serve file lewat URL)."""
+    result = {"path": None}
+
+    def open_dialog():
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        result["path"] = filedialog.askopenfilename(
+            title="Pilih Citra Apusan Darah",
+            filetypes=[
+                ("Gambar", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff"),
+                ("Semua file", "*.*"),
+            ],
+        )
+        root.destroy()
+
+    t = threading.Thread(target=open_dialog)
+    t.start()
+    t.join()
+
+    if not result["path"]:
+        return jsonify({"ok": False}), 400
+
+    frame = cv2.imread(result["path"])
+    if frame is None:
+        return jsonify({"ok": False, "message": "Gagal membaca file gambar."}), 400
+
+    b64 = frame_to_png_base64(frame)
+    height, width = frame.shape[:2]
+    return jsonify({
+        "ok": True,
+        "path": result["path"],
+        "filename": os.path.basename(result["path"]),
+        "image": b64,
+        "width": width,
+        "height": height,
+    })
+
+
+@app.route("/api/segmentation/run", methods=["POST"])
+def api_segmentation_run():
+    """PLACEHOLDER -- model instance segmentation beneran (Mask R-CNN/
+    Detectron2, dilatih dari RBC Chula dataset) belum dilatih & dipasang.
+    Endpoint ini mengembalikan deteksi DUMMY (lihat
+    generate_mock_instance_segmentation) supaya seluruh alur UI bisa
+    dibangun & dites duluan. Begitu modelnya siap, ganti isi fungsi ini jadi
+    manggil inference beneran -- kontrak response-nya (detections +
+    classCounts) dipertahankan supaya frontend nggak perlu diubah lagi."""
+    data = request.json or {}
+    path = (data.get("path") or "").strip()
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "message": "Gambar sumber tidak valid."}), 400
+
+    frame = cv2.imread(path)
+    if frame is None:
+        return jsonify({"ok": False, "message": "Gagal membaca gambar sumber."}), 400
+
+    # Simulasi waktu proses model beneran, biar indikator progres di UI ada
+    # gunanya buat dites -- kecilkan/hapus begitu inference asli dipasang.
+    time.sleep(1.2)
+
+    detections = generate_mock_instance_segmentation(frame)
+    class_counts = {label: 0 for label in RBC_CLASS_LABELS}
+    for d in detections:
+        class_counts[d["classLabel"]] += 1
+
+    height, width = frame.shape[:2]
+    return jsonify({
+        "ok": True,
+        "mock": True,
+        "message": (
+            "Hasil DUMMY/placeholder -- model instance segmentation "
+            "(Mask R-CNN/Detectron2) belum dilatih. Ini cuma buat menguji "
+            "alur UI-nya duluan."
+        ),
+        "imageWidth": width,
+        "imageHeight": height,
+        "detections": detections,
+        "classCounts": class_counts,
+    })
+
+
+def _load_segmentation_detail_file(detail_path):
+    """Logic bersama buat baca satu file JSON hasil segmentasi + coba baca
+    ulang gambar sumbernya buat preview. Dipakai baik dari dialog
+    (/api/segmentation/load) maupun klik langsung di daftar hasil folder
+    (/api/segmentation/load-path, tanpa buka dialog lagi -- ini yang bikin
+    review banyak hasil sekaligus, mis. ~20 capture per pasien, nggak perlu
+    buka-tutup dialog file satu-satu)."""
+    try:
+        with open(detail_path, "r", encoding="utf-8") as f:
+            detail = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return {"ok": False, "message": f"Gagal membaca file: {e}"}
+
+    source_image = detail.get("sourceImage")
+    detections = detail.get("detections") or []
+
+    response = {
+        "ok": True,
+        "path": source_image,
+        "detailFile": os.path.basename(detail_path),
+        "patientId": detail.get("patientId"),
+        "detections": detections,
+        "image": None,
+        "width": None,
+        "height": None,
+    }
+
+    if source_image and os.path.isfile(source_image):
+        frame = cv2.imread(source_image)
+        if frame is not None:
+            response["image"] = frame_to_png_base64(frame)
+            h, w = frame.shape[:2]
+            response["width"] = w
+            response["height"] = h
+
+    if response["image"] is None:
+        response["message"] = (
+            "Gambar sumber asli tidak ditemukan/gagal dibaca di lokasi "
+            "semula -- cuma daftar sel yang berhasil dimuat."
+        )
+
+    return response
+
+
+@app.route("/api/segmentation/load", methods=["POST"])
+def api_segmentation_load():
+    """Buka file JSON hasil segmentasi yang sudah pernah disimpan lewat
+    /api/segmentation/save, muat balik detections-nya (termasuk koreksi
+    manual sebelumnya kalau ada), dan coba baca ulang gambar sumbernya buat
+    preview -- biar user bisa lihat & lanjut koreksi tanpa mulai dari nol."""
+    result = {"path": None}
+
+    def open_dialog():
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        result["path"] = filedialog.askopenfilename(
+            title="Pilih File Hasil Segmentasi (JSON)",
+            filetypes=[("Hasil segmentasi (JSON)", "*.json"), ("Semua file", "*.*")],
+        )
+        root.destroy()
+
+    t = threading.Thread(target=open_dialog)
+    t.start()
+    t.join()
+
+    if not result["path"]:
+        return jsonify({"ok": False}), 400
+
+    return jsonify(_load_segmentation_detail_file(result["path"]))
+
+
+@app.route("/api/segmentation/load-path", methods=["POST"])
+def api_segmentation_load_path():
+    """Sama seperti /api/segmentation/load, tapi path file JSON-nya dikirim
+    langsung dari frontend (klik salah satu baris di daftar "Hasil di
+    Folder Ini"), TANPA buka dialog file lagi -- dipakai buat review hasil
+    batch (banyak gambar sekaligus, mis. satu pasien ~20 capture) tanpa
+    perlu buka-tutup dialog satu-satu per gambar."""
+    data = request.json or {}
+    detail_path = (data.get("path") or "").strip()
+    if not detail_path or not os.path.isfile(detail_path):
+        return jsonify({"ok": False, "message": "File hasil tidak valid."}), 400
+    return jsonify(_load_segmentation_detail_file(detail_path))
+
+
+@app.route("/api/segmentation/list-results")
+def api_segmentation_list_results():
+    """Daftar hasil segmentasi TERBARU per gambar sumber di satu folder
+    (dibaca dari segmentation_log.csv) -- ditampilkan sebagai daftar yang
+    bisa diklik satu-satu di dalam aplikasi (lewat /load-path).
+
+    Satu gambar bisa saja tercatat berkali-kali di log (mis. diproses
+    individual dulu, terus ikut ke-proses lagi lewat batch, atau batch
+    dijalankan dua kali) -- karena hasilnya masih DUMMY/acak, tiap proses
+    ulang menghasilkan deteksi yang beda. Supaya nggak ambigu "yang mana
+    yang berlaku", di sini CUMA baris dengan timestamp TERBARU per
+    source_image yang ditampilkan; baris-baris lama tetap ada di CSV
+    (nggak dihapus, buat jejak audit) tapi disembunyikan dari daftar ini."""
+    folder = (request.args.get("folder") or "").strip()
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"ok": False, "message": "Folder tidak valid."}), 400
+
+    try:
+        rows = _latest_segmentation_rows(folder)
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"Gagal membaca log: {e}"}), 500
+
+    results = [
+        {
+            "detailPath": os.path.join(folder, row.get("detail_file")),
+            "detailFile": row.get("detail_file"),
+            "sourceImage": row.get("source_image"),
+            "patientId": row.get("patient_id"),
+            "totalCells": row.get("total_cells"),
+            "timestamp": row.get("timestamp"),
+        }
+        for row in rows
+        if row.get("detail_file")
+    ]
+    results.sort(key=lambda r: r["timestamp"] or "", reverse=True)
+    return jsonify({"ok": True, "folder": folder, "results": results})
+
+
+@app.route("/api/segmentation/save", methods=["POST"])
+def api_segmentation_save():
+    """Simpan hasil segmentasi (termasuk koreksi manual dari UI, kalau ada)
+    ke dua tempat, keduanya di folder yang sama dengan gambar sumbernya:
+      1. File JSON detail per-sel (mask polygon, confidence, status koreksi)
+      2. Satu baris ringkasan di segmentation_log.csv (jumlah sel per kelas
+         -- format kolom per kelas biar gampang dianalisis langsung di Excel)
+    """
+    data = request.json or {}
+    path = (data.get("path") or "").strip()
+    patient_id = (data.get("patientId") or "").strip()
+    detections = data.get("detections") or []
+
+    if not path or not os.path.isfile(path):
+        return jsonify({"ok": False, "message": "Gambar sumber tidak valid."}), 400
+    if not detections:
+        return jsonify({"ok": False, "message": "Belum ada hasil segmentasi untuk disimpan."}), 400
+
+    folder = os.path.dirname(path)
+    base_name = os.path.splitext(os.path.basename(path))[0]
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    with segmentation_log_lock:
+        detail_filename = f"{base_name}_segmentation_{timestamp}.json"
+        detail_path = os.path.join(folder, detail_filename)
+        try:
+            with open(detail_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "timestamp": timestamp,
+                    "patientId": patient_id,
+                    "sourceImage": path,
+                    "detections": detections,
+                }, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            return jsonify({"ok": False, "message": f"Gagal menyimpan file detail: {e}"}), 500
+
+        class_counts = {label: 0 for label in RBC_CLASS_LABELS}
+        for d in detections:
+            label = d.get("correctedClassLabel") or d.get("classLabel")
+            if label in class_counts:
+                class_counts[label] += 1
+
+        log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
+        is_new = not os.path.exists(log_path)
+        fieldnames = ["timestamp", "patient_id", "source_image", "detail_file", "total_cells"] + RBC_CLASS_LABELS
+        row = {
+            "timestamp": timestamp,
+            "patient_id": patient_id or "?",
+            "source_image": os.path.basename(path),
+            "detail_file": detail_filename,
+            "total_cells": len(detections),
+            **class_counts,
+        }
+        try:
+            with open(log_path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                if is_new:
+                    writer.writeheader()
+                writer.writerow(row)
+        except OSError as e:
+            return jsonify({"ok": False, "message": f"Gagal menulis log: {e}"}), 500
+
+    return jsonify({
+        "ok": True,
+        "detailPath": detail_path,
+        "logPath": log_path,
+        "totalCells": len(detections),
+    })
+
+
+@app.route("/api/segmentation/batch-select", methods=["POST"])
+def api_segmentation_batch_select():
+    """Dialog pilih FOLDER buat proses batch -- daftar file gambar langsung
+    di dalam folder itu (bukan rekursif ke subfolder) dikembalikan supaya
+    frontend bisa konfirmasi dulu jumlahnya ke user sebelum benar-benar
+    diproses (bisa makan waktu kalau isinya banyak)."""
+    result = {"path": None}
+
+    def open_dialog():
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        result["path"] = filedialog.askdirectory(title="Pilih Folder Citra untuk Diproses Batch")
+        root.destroy()
+
+    t = threading.Thread(target=open_dialog)
+    t.start()
+    t.join()
+
+    if not result["path"]:
+        return jsonify({"ok": False}), 400
+
+    image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+    try:
+        files = sorted(
+            f for f in os.listdir(result["path"])
+            if f.lower().endswith(image_exts) and os.path.isfile(os.path.join(result["path"], f))
+        )
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"Gagal membaca isi folder: {e}"}), 400
+
+    return jsonify({"ok": True, "folder": result["path"], "files": files})
+
+
+@app.route("/api/segmentation/batch-run", methods=["POST"])
+def api_segmentation_batch_run():
+    """PLACEHOLDER -- proses SEMUA gambar dalam satu folder sekaligus:
+    jalankan (mock) instance segmentation + langsung simpan hasilnya (JSON
+    detail + baris di segmentation_log.csv) untuk tiap gambar, tanpa jeda
+    buat koreksi manual per gambar (koreksi tetap bisa dilakukan belakangan
+    per file lewat "Muat Hasil Tersimpan"). Model instance segmentation
+    beneran belum dilatih -- begitu siap, ganti pemanggilan
+    generate_mock_instance_segmentation() di bawah jadi inference asli,
+    sisanya (penyimpanan, agregasi) nggak perlu diubah."""
+    data = request.json or {}
+    folder = (data.get("folder") or "").strip()
+    patient_id = (data.get("patientId") or "").strip()
+    skip_existing = bool(data.get("skipExisting"))
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"ok": False, "message": "Folder tidak valid."}), 400
+
+    image_exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+    files = sorted(
+        f for f in os.listdir(folder)
+        if f.lower().endswith(image_exts) and os.path.isfile(os.path.join(folder, f))
+    )
+    if not files:
+        return jsonify({"ok": False, "message": "Tidak ada file gambar di folder ini."}), 400
+
+    grand_total_counts = {label: 0 for label in RBC_CLASS_LABELS}
+    per_image_results = []
+    already_processed = set()
+
+    with segmentation_log_lock:
+        log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
+        is_new_log = not os.path.exists(log_path)
+        fieldnames = ["timestamp", "patient_id", "source_image", "detail_file", "total_cells"] + RBC_CLASS_LABELS
+
+        if skip_existing and os.path.isfile(log_path):
+            try:
+                with open(log_path, "r", newline="", encoding="utf-8") as f:
+                    for row in csv.DictReader(f):
+                        si = row.get("source_image")
+                        if si:
+                            already_processed.add(si)
+            except OSError:
+                pass
+
+        for fname in files:
+            if skip_existing and fname in already_processed:
+                per_image_results.append({
+                    "filename": fname, "ok": True, "skipped": True,
+                    "message": "Dilewati -- sudah pernah diproses sebelumnya.",
+                })
+                continue
+
+            fpath = os.path.join(folder, fname)
+            frame = cv2.imread(fpath)
+            if frame is None:
+                per_image_results.append({"filename": fname, "ok": False, "message": "Gagal dibaca."})
+                continue
+
+            # Delay simulasi diperkecil dibanding mode satu-gambar, biar
+            # batch banyak file nggak kelamaan -- hapus kalau model beneran
+            # sudah dipasang (delay ini murni buat placeholder).
+            time.sleep(0.3)
+            detections = generate_mock_instance_segmentation(frame)
+
+            base_name = os.path.splitext(fname)[0]
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            detail_filename = f"{base_name}_segmentation_{timestamp}.json"
+            detail_path = os.path.join(folder, detail_filename)
+            try:
+                with open(detail_path, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "timestamp": timestamp,
+                        "patientId": patient_id,
+                        "sourceImage": fpath,
+                        "detections": detections,
+                    }, f, ensure_ascii=False, indent=2)
+            except OSError as e:
+                per_image_results.append({"filename": fname, "ok": False, "message": f"Gagal menyimpan detail: {e}"})
+                continue
+
+            class_counts = {label: 0 for label in RBC_CLASS_LABELS}
+            for d in detections:
+                class_counts[d["classLabel"]] += 1
+                grand_total_counts[d["classLabel"]] += 1
+
+            row = {
+                "timestamp": timestamp,
+                "patient_id": patient_id or "?",
+                "source_image": fname,
+                "detail_file": detail_filename,
+                "total_cells": len(detections),
+                **class_counts,
+            }
+            try:
+                with open(log_path, "a", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    if is_new_log:
+                        writer.writeheader()
+                        is_new_log = False
+                    writer.writerow(row)
+            except OSError as e:
+                per_image_results.append({"filename": fname, "ok": False, "message": f"Gagal menulis log: {e}"})
+                continue
+
+            per_image_results.append({
+                "filename": fname,
+                "ok": True,
+                "totalCells": len(detections),
+                "classCounts": class_counts,
+                "detailFile": detail_filename,
+            })
+
+    total_skipped = sum(1 for r in per_image_results if r.get("skipped"))
+    total_processed = sum(1 for r in per_image_results if r["ok"] and not r.get("skipped"))
+    return jsonify({
+        "ok": True,
+        "mock": True,
+        "folder": folder,
+        "totalImages": len(files),
+        "totalImagesOk": sum(1 for r in per_image_results if r["ok"]),
+        "totalSkipped": total_skipped,
+        "grandTotalCounts": grand_total_counts,
+        "perImage": per_image_results,
+        "message": (
+            f"Batch selesai (hasil DUMMY/placeholder) -- {total_processed} gambar diproses"
+            + (f", {total_skipped} dilewati (sudah ada)" if total_skipped else "")
+            + ". Model instance segmentation beneran belum dilatih."
+        ),
+    })
+
+
+@app.route("/api/segmentation/check-existing")
+def api_segmentation_check_existing():
+    """Cek apakah satu gambar (by path) sudah pernah punya hasil segmentasi
+    tersimpan di segmentation_log.csv folder yang sama -- dipakai buat
+    warning sebelum reprocess individual (biar nggak nggak sadar bikin
+    hasil baru yang beda random dari yang lama, lihat juga skipExisting di
+    /batch-run buat kasus batch)."""
+    path = (request.args.get("path") or "").strip()
+    if not path:
+        return jsonify({"exists": False})
+
+    folder = os.path.dirname(path)
+    fname = os.path.basename(path)
+    log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
+    if not os.path.isfile(log_path):
+        return jsonify({"exists": False})
+
+    latest = None
+    try:
+        with open(log_path, "r", newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("source_image") != fname:
+                    continue
+                ts = row.get("timestamp") or ""
+                if latest is None or ts >= (latest.get("timestamp") or ""):
+                    latest = row
+    except OSError:
+        return jsonify({"exists": False})
+
+    if latest is None:
+        return jsonify({"exists": False})
+
+    return jsonify({
+        "exists": True,
+        "detailFile": latest.get("detail_file"),
+        "totalCells": latest.get("total_cells"),
+        "timestamp": latest.get("timestamp"),
+    })
+
+
+@app.route("/api/segmentation/patient-summary")
+def api_segmentation_patient_summary():
+    """Agregasi segmentation_log.csv per patient_id dalam satu folder --
+    total gambar, total sel, dan breakdown per kelas.
+
+    Dedup dulu per source_image (ambil baris TERBARU aja per gambar,
+    sama seperti /api/segmentation/list-results) SEBELUM diagregasi --
+    kalau tidak, gambar yang kebetulan diproses lebih dari sekali
+    (individual lalu ikut batch, atau batch dijalankan dua kali) bakal
+    kehitung dobel/lebih di total & breakdown per kelas."""
+    folder = (request.args.get("folder") or "").strip()
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"ok": False, "message": "Folder tidak valid."}), 400
+
+    try:
+        rows = _latest_segmentation_rows(folder)
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"Gagal membaca log: {e}"}), 500
+
+    patients = {}
+    for row in rows:
+        pid = row.get("patient_id") or "?"
+        if pid not in patients:
+            patients[pid] = {
+                "patientId": pid,
+                "totalImages": 0,
+                "totalCells": 0,
+                "classCounts": {label: 0 for label in RBC_CLASS_LABELS},
+            }
+        patients[pid]["totalImages"] += 1
+        try:
+            patients[pid]["totalCells"] += int(row.get("total_cells") or 0)
+        except ValueError:
+            pass
+        for label in RBC_CLASS_LABELS:
+            try:
+                patients[pid]["classCounts"][label] += int(row.get(label) or 0)
+            except (ValueError, TypeError):
+                pass
+
+    return jsonify({
+        "ok": True,
+        "patients": sorted(patients.values(), key=lambda p: p["patientId"]),
+    })
+
+
+def _latest_segmentation_rows(folder):
+    """Baca segmentation_log.csv di satu folder, dedup ambil baris TERBARU
+    per source_image -- helper yang sama dipakai /list-results dan
+    /patient-summary, dipusatkan di sini juga buat /export-report."""
+    log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
+    if not os.path.isfile(log_path):
+        return []
+    latest_by_image = {}
+    with open(log_path, "r", newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            si = row.get("source_image")
+            if not si:
+                continue
+            ts = row.get("timestamp") or ""
+            existing = latest_by_image.get(si)
+            if existing is not None and existing.get("timestamp", "") >= ts:
+                continue
+            latest_by_image[si] = row
+    return list(latest_by_image.values())
+
+
+@app.route("/api/segmentation/export-report", methods=["POST"])
+def api_segmentation_export_report():
+    """Export laporan ringkasan hasil segmentasi satu folder ke file Excel
+    (2 sheet: ringkasan per pasien, dan detail per gambar) -- dedup terbaru
+    per gambar, konsisten sama yang ditampilkan di aplikasi (Ringkasan per
+    Pasien / Hasil di Folder Ini). Kalau patientId diisi, cuma pasien itu
+    yang diekspor; kalau kosong, semua pasien di folder itu."""
+    data = request.json or {}
+    folder = (data.get("folder") or "").strip()
+    patient_id_filter = (data.get("patientId") or "").strip()
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"ok": False, "message": "Folder tidak valid."}), 400
+
+    rows = _latest_segmentation_rows(folder)
+    if patient_id_filter:
+        rows = [r for r in rows if (r.get("patient_id") or "") == patient_id_filter]
+    if not rows:
+        return jsonify({"ok": False, "message": "Tidak ada hasil yang cocok untuk diekspor."}), 400
+
+    try:
+        import openpyxl
+        from openpyxl.styles import Font
+    except ImportError:
+        return jsonify({
+            "ok": False,
+            "message": "Library openpyxl belum terinstall di server (pip install openpyxl).",
+        }), 500
+
+    wb = openpyxl.Workbook()
+
+    ws1 = wb.active
+    ws1.title = "Ringkasan Pasien"
+    ws1.append(["ID Pasien", "Jumlah Gambar", "Total Sel"] + RBC_CLASS_LABELS)
+    for cell in ws1[1]:
+        cell.font = Font(bold=True)
+
+    patients = {}
+    for row in rows:
+        pid = row.get("patient_id") or "?"
+        if pid not in patients:
+            patients[pid] = {"images": 0, "totalCells": 0, "counts": {l: 0 for l in RBC_CLASS_LABELS}}
+        patients[pid]["images"] += 1
+        try:
+            patients[pid]["totalCells"] += int(row.get("total_cells") or 0)
+        except ValueError:
+            pass
+        for label in RBC_CLASS_LABELS:
+            try:
+                patients[pid]["counts"][label] += int(row.get(label) or 0)
+            except (ValueError, TypeError):
+                pass
+    for pid, agg in sorted(patients.items()):
+        ws1.append([pid, agg["images"], agg["totalCells"]] + [agg["counts"][l] for l in RBC_CLASS_LABELS])
+
+    ws2 = wb.create_sheet("Detail per Gambar")
+    ws2.append(["Timestamp", "ID Pasien", "Gambar", "Total Sel"] + RBC_CLASS_LABELS)
+    for cell in ws2[1]:
+        cell.font = Font(bold=True)
+    for row in sorted(rows, key=lambda r: r.get("timestamp") or ""):
+        ws2.append(
+            [row.get("timestamp"), row.get("patient_id"), row.get("source_image"), row.get("total_cells")]
+            + [row.get(l) for l in RBC_CLASS_LABELS]
+        )
+
+    for ws in (ws1, ws2):
+        for col_cells in ws.columns:
+            length = max((len(str(c.value)) if c.value is not None else 0) for c in col_cells)
+            ws.column_dimensions[col_cells[0].column_letter].width = min(30, max(10, length + 2))
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_patient = safe_slug(patient_id_filter) if patient_id_filter else "semua-pasien"
+    filename = f"laporan_segmentasi_{safe_patient}_{timestamp}.xlsx"
+    export_path = os.path.join(folder, filename)
+    try:
+        wb.save(export_path)
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"Gagal menyimpan file laporan: {e}"}), 500
+
+    return jsonify({"ok": True, "path": export_path, "filename": filename})
+
+
+# ---------------------------------------------------------------------------
+# Status & konfigurasi model segmentasi
+# ---------------------------------------------------------------------------
+# Placeholder transparansi -- inference model instance segmentation ASLI
+# (Mask R-CNN/Detectron2) belum dipasang sama sekali (lihat
+# generate_mock_instance_segmentation). File config ini cuma NYIMPAN path
+# checkpoint yang direncanakan dipakai nanti, belum benar-benar memuat/
+# menjalankan model apapun -- tujuannya biar plumbing-nya sudah siap begitu
+# integrasi model beneran dikerjakan (tinggal baca MODEL_CONFIG_PATH di
+# generate_mock_instance_segmentation/api_segmentation_run dan branch ke
+# inference asli).
+MODEL_CONFIG_FILENAME = "model_config.json"
+MODEL_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), MODEL_CONFIG_FILENAME
+)
+
+
+def _load_model_config():
+    if os.path.isfile(MODEL_CONFIG_PATH):
+        try:
+            with open(MODEL_CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {"modelPath": ""}
+
+
+@app.route("/api/segmentation/model-status")
+def api_segmentation_model_status():
+    config = _load_model_config()
+    model_path = (config.get("modelPath") or "").strip()
+    model_file_found = bool(model_path) and os.path.isfile(model_path)
+    if model_path:
+        detail = (
+            f'Path model tersimpan ("{model_path}"), tapi kode inference asli belum '
+            "dipasang -- ini baru tempat konfigurasi buat nanti."
+        )
+    else:
+        detail = "Belum ada path model dikonfigurasi."
+    return jsonify({
+        "ok": True,
+        "usingMock": True,
+        "modelPath": model_path,
+        "modelFileFound": model_file_found,
+        "message": "Semua hasil segmentasi saat ini masih DUMMY/placeholder. " + detail,
+    })
+
+
+@app.route("/api/segmentation/model-config", methods=["POST"])
+def api_segmentation_model_config():
+    data = request.json or {}
+    model_path = (data.get("modelPath") or "").strip()
+    try:
+        with open(MODEL_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"modelPath": model_path}, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"Gagal menyimpan konfigurasi: {e}"}), 500
+    return jsonify({"ok": True, "modelPath": model_path})
 
 
 if __name__ == "__main__":

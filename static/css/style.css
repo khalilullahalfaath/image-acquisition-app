@@ -41,6 +41,7 @@ body {
   border-radius: 20px;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
 }
 .tab-active { background: var(--blue-600); color: var(--white); }
 .tab-disabled { color: var(--slate-400); cursor: not-allowed; }
@@ -282,3 +283,181 @@ body {
 }
 .summary-row:last-child { border-bottom: none; }
 .summary-total { font-weight: 600; margin-top: 8px; }
+
+.view-hidden { display: none !important; }
+.segmentation-class-panel { margin-top: 20px; }
+
+/* Wrapper-nya sengaja diisi 100% dari panel-body (yang sudah punya ukuran
+   pasti lewat .seg-panels-row .panel { height:460px }), BUKAN
+   display:inline-block/shrink-to-fit -- kalau lebarnya nggak pasti,
+   max-width:100% di <img> nggak bisa dihitung dan gambar balik ke ukuran
+   natural aslinya (jadi melebar keluar panel). object-fit:contain di <img>
+   yang menjaga proporsinya, bukan max-width/max-height. */
+.seg-overlay-wrap { position: relative; width: 100%; height: 100%; }
+.seg-overlay-wrap img { display: block; width: 100%; height: 100%; object-fit: contain; border-radius: 6px; }
+.seg-overlay-wrap svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.seg-overlay-wrap svg polygon { transition: stroke-width 0.15s ease; pointer-events: auto; cursor: pointer; }
+.seg-overlay-wrap.seg-add-mode-active svg polygon { cursor: crosshair; }
+.seg-overlay-wrap svg polygon.seg-polygon-active { stroke-width: 4; }
+
+.seg-image-tabs { display: flex; gap: 6px; align-items: center; }
+.seg-list-refresh { margin-left: auto; }
+.seg-image-tab {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+  color: var(--slate-800);
+  cursor: pointer;
+}
+.seg-image-tab-active { background: var(--blue-600); border-color: var(--blue-600); color: var(--white); }
+
+.panel-narrow { flex: 0 0 340px; max-width: 340px; }
+
+/* Baris panel khusus tab Segmentasi: tinggi panel DIPATOK (bukan cuma
+   min-height kayak .panel biasa) supaya panel gambar & panel Daftar Sel
+   selalu sama tinggi persis -- daftar sel nggak akan pernah lebih tinggi
+   dari gambar, dan kalau isinya kepanjangan, discroll di dalam
+   (.panel-body-list) bukan bikin panelnya membesar. */
+.seg-panels-row .panel { height: 460px; }
+.panel-body-list {
+  flex: 1;
+  margin-top: 12px;
+  border-radius: 10px;
+  background: var(--slate-50);
+  overflow-y: auto;
+  padding: 4px 12px;
+}
+
+.seg-detection-row { cursor: pointer; align-items: center; }
+.seg-detection-row.seg-row-active { background: var(--blue-50); border-radius: 6px; }
+
+.seg-result-list-row { cursor: pointer; }
+.seg-result-list-row:hover { background: var(--slate-50); border-radius: 6px; }
+
+.seg-panel-header-actions { display: flex; gap: 8px; }
+
+.seg-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.seg-bulk-select-all {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--slate-500);
+  cursor: pointer;
+}
+
+.seg-results-filter {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-300);
+  font-size: 12px;
+  width: 100%;
+}
+
+.seg-model-status-text { font-size: 12px; color: var(--slate-500); margin-bottom: 10px; }
+.seg-model-config-row { display: flex; gap: 8px; }
+.seg-model-config-row input {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-300);
+  font-size: 12px;
+}
+
+.seg-cell-checkbox { margin-right: 6px; }
+.seg-class-select {
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+}
+.seg-color-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.seg-corrected-tag {
+  font-size: 10px;
+  background: #fef3c7;
+  color: #92400e;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+.seg-manual-tag {
+  font-size: 10px;
+  background: #e0e7ff;
+  color: #3730a3;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+.seg-low-conf-tag {
+  font-size: 10px;
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+}
+.seg-row-low-confidence { border-left: 3px solid var(--red-500); padding-left: 6px; }
+
+.seg-row-controls { display: flex; gap: 6px; align-items: center; }
+.seg-delete-btn {
+  border: none;
+  background: none;
+  color: var(--red-500);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.seg-delete-btn:hover { background: #fee2e2; border-radius: 4px; }
+
+.seg-detections-help {
+  font-size: 11px;
+  color: var(--slate-500);
+  margin-top: 4px;
+}
+
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+.seg-tools-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.btn-toggle-active { background: var(--blue-600); border-color: var(--blue-600); color: var(--white); }
+
+.btn-icon-sm {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+  color: var(--slate-800);
+  cursor: pointer;
+}
+.seg-zoom-controls { display: flex; align-items: center; gap: 6px; }
+.seg-zoom-label { font-size: 12px; color: var(--slate-500); min-width: 38px; text-align: center; }
+
+/* Elemen gambar (img polos di segSourceBody / .seg-overlay-wrap di
+   segResultBody) yang kena transform zoom+pan lewat JS -- overflow:hidden
+   di .panel-body sudah bertugas motong bagian yang keluar area panel pas
+   di-zoom, jadi nggak perlu scrollbar. */
+.panel-body img,
+.seg-overlay-wrap { transition: transform 0.05s linear; }

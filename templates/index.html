@@ -11,15 +11,10 @@
   <body>
     <div class="topbar">
       <div class="tab-group">
-        <div class="tab tab-active">Capture</div>
-        <div
-          class="tab tab-disabled"
-          title="Belum tersedia di scope prototype ini"
-        >
-          Segmentasi
-        </div>
+        <div id="tabCapture" class="tab tab-active">Capture</div>
+        <div id="tabSegmentation" class="tab">Segmentasi</div>
       </div>
-      <div class="camera-group">
+      <div id="cameraGroup" class="camera-group">
         <div class="camera-status">
           <span id="cameraDot" class="dot dot-off"></span>
           <span id="cameraLabel">Kamera tidak terdeteksi</span>
@@ -57,82 +52,295 @@
     </div>
 
     <div class="page">
-      <div class="header-row">
-        <div class="patient-field">
-          <label for="patientName">Inisial Pasien</label>
-          <input
-            id="patientName"
-            type="text"
-            placeholder="Masukkan inisial pasien..."
-          />
+      <div id="captureView" class="view">
+        <div class="header-row">
+          <div class="patient-field">
+            <label for="patientName">Inisial Pasien</label>
+            <input
+              id="patientName"
+              type="text"
+              placeholder="Masukkan inisial pasien..."
+            />
+          </div>
         </div>
-      </div>
 
-      <div class="toolbar-row">
-        <button id="btnCapture" class="btn btn-primary" disabled>
-          &#9679; Capture
-        </button>
-        <div class="toolbar-right">
-          <button id="btnFolder" class="btn btn-outline">Lokasi Simpan</button>
-          <button id="btnSummary" class="btn btn-outline" disabled>
-            Ringkasan Folder
+        <div class="toolbar-row">
+          <button id="btnCapture" class="btn btn-primary" disabled>
+            &#9679; Capture
           </button>
-          <button id="btnSave" class="btn btn-success" disabled>Save</button>
-        </div>
-      </div>
-      <div id="folderPath" class="folder-path"></div>
-
-      <div id="summaryPanel" class="summary-panel summary-hidden">
-        <div class="summary-header">
-          <span>Ringkasan folder tujuan</span>
-          <button id="btnCloseSummary" class="summary-close">&times;</button>
-        </div>
-        <div id="summaryBody" class="summary-body"></div>
-      </div>
-
-      <div class="panels-row">
-        <div class="panel">
-          <div class="panel-title">
-            <span class="dot dot-live"></span>Stream Mikroskop
-          </div>
-          <div class="panel-body" id="streamBody">
-            <span class="placeholder-text"
-              >Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop untuk
-              memulai</span
+          <div class="toolbar-right">
+            <button id="btnFolder" class="btn btn-outline">Lokasi Simpan</button>
+            <button id="btnSummary" class="btn btn-outline" disabled>
+              Ringkasan Folder
+            </button>
+            <button id="btnSave" class="btn btn-success" disabled>Save</button>
+            <button
+              id="btnSendToSegmentation"
+              class="btn btn-outline"
+              disabled
+              title="Kirim gambar yang baru disimpan ke tab Segmentasi"
             >
+              Kirim ke Segmentasi
+            </button>
           </div>
         </div>
-        <div class="panel">
-          <div class="panel-title-row">
+        <div id="folderPath" class="folder-path"></div>
+
+        <div id="summaryPanel" class="summary-panel summary-hidden">
+          <div class="summary-header">
+            <span>Ringkasan folder tujuan</span>
+            <button id="btnCloseSummary" class="summary-close">&times;</button>
+          </div>
+          <div id="summaryBody" class="summary-body"></div>
+        </div>
+
+        <div class="panels-row">
+          <div class="panel">
             <div class="panel-title">
-              <span class="dot dot-idle"></span>Hasil Capture
+              <span class="dot dot-live"></span>Stream Mikroskop
             </div>
-            <div class="badge-group">
-              <div id="focusBadge" class="badge badge-hidden"></div>
-              <div id="blankBadge" class="badge badge-hidden"></div>
-              <div id="captureBadge" class="badge badge-hidden"></div>
+            <div class="panel-body" id="streamBody">
+              <span class="placeholder-text"
+                >Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop untuk
+                memulai</span
+              >
             </div>
           </div>
-          <div class="panel-body" id="captureBody">
-            <span class="placeholder-text">Belum ada gambar</span>
+          <div class="panel">
+            <div class="panel-title-row">
+              <div class="panel-title">
+                <span class="dot dot-idle"></span>Hasil Capture
+              </div>
+              <div class="badge-group">
+                <div id="focusBadge" class="badge badge-hidden"></div>
+                <div id="blankBadge" class="badge badge-hidden"></div>
+                <div id="captureBadge" class="badge badge-hidden"></div>
+              </div>
+            </div>
+            <div class="panel-body" id="captureBody">
+              <span class="placeholder-text">Belum ada gambar</span>
+            </div>
+            <div id="captureFilename" class="capture-filename"></div>
           </div>
-          <div id="captureFilename" class="capture-filename"></div>
+        </div>
+
+        <div class="gallery-row">
+          <div class="gallery-title">Riwayat tersimpan sesi ini</div>
+          <div id="galleryStrip" class="gallery-strip">
+            <span class="gallery-empty">Belum ada yang disimpan di sesi ini.</span>
+          </div>
+        </div>
+
+        <div class="footer-row">
+          <div class="footer-count">
+            Jumlah gambar tercapture : <span id="captureCount">0</span>
+          </div>
+          <div class="footer-format">
+            Format penyimpanan: inisial-pasien_timestamp_iterasi.png
+          </div>
         </div>
       </div>
 
-      <div class="gallery-row">
-        <div class="gallery-title">Riwayat tersimpan sesi ini</div>
-        <div id="galleryStrip" class="gallery-strip">
-          <span class="gallery-empty">Belum ada yang disimpan di sesi ini.</span>
+      <div id="segmentationView" class="view view-hidden">
+        <div class="header-row">
+          <div class="patient-field">
+            <label for="segPatientName"
+              >ID Pasien (opsional, ikut tersimpan di hasil)</label
+            >
+            <input
+              id="segPatientName"
+              type="text"
+              placeholder="Masukkan ID pasien..."
+            />
+          </div>
         </div>
-      </div>
 
-      <div class="footer-row">
-        <div class="footer-count">
-          Jumlah gambar tercapture : <span id="captureCount">0</span>
+        <div class="toolbar-row">
+          <div>
+            <button id="btnSegSelectImage" class="btn btn-outline">
+              Pilih Gambar
+            </button>
+            <button
+              id="btnLoadSegmentation"
+              class="btn btn-outline"
+              title="Buka hasil segmentasi yang sudah pernah disimpan untuk dilihat/dikoreksi lagi"
+            >
+              Muat Hasil Tersimpan
+            </button>
+            <button
+              id="btnSegBatchRun"
+              class="btn btn-outline"
+              title="Proses semua gambar dalam satu folder sekaligus, cocok kalau satu sampel/pasien punya banyak capture (mis. ~20 gambar)"
+            >
+              Pilih Folder &amp; Proses Batch
+            </button>
+          </div>
+          <div class="toolbar-right">
+            <button id="btnRunSegmentation" class="btn btn-primary" disabled>
+              Jalankan Segmentasi
+            </button>
+            <button id="btnSaveSegmentation" class="btn btn-success" disabled>
+              Simpan Hasil
+            </button>
+          </div>
         </div>
-        <div class="footer-format">
-          Format penyimpanan: inisial-pasien_timestamp_iterasi.png
+        <div id="segImagePath" class="folder-path"></div>
+
+        <div class="seg-tools-row">
+          <button
+            type="button"
+            id="btnSegAddCell"
+            class="btn btn-outline"
+            disabled
+            title="Klik tombol ini, lalu klik posisi sel di gambar Hasil Segmentasi untuk menambah sel yang kelewat dideteksi"
+          >
+            + Tambah Sel Manual
+          </button>
+          <div class="seg-zoom-controls">
+            <button type="button" id="btnSegZoomOut" class="btn-icon-sm" title="Perkecil">&minus;</button>
+            <span id="segZoomLabel" class="seg-zoom-label">100%</span>
+            <button type="button" id="btnSegZoomIn" class="btn-icon-sm" title="Perbesar">+</button>
+            <button type="button" id="btnSegZoomReset" class="btn-icon-sm" title="Reset zoom">Reset</button>
+          </div>
+        </div>
+
+        <div class="panels-row seg-panels-row">
+          <div class="panel">
+            <div class="seg-image-tabs">
+              <button
+                type="button"
+                id="segTabSource"
+                class="seg-image-tab seg-image-tab-active"
+              >
+                Gambar Sumber
+              </button>
+              <button type="button" id="segTabResult" class="seg-image-tab">
+                Hasil Segmentasi
+              </button>
+            </div>
+            <div class="panel-body" id="segSourceBody">
+              <span class="placeholder-text"
+                >Belum ada gambar dipilih<br />Klik "Pilih Gambar", atau kirim
+                dari hasil Capture yang sudah disimpan</span
+              >
+            </div>
+            <div class="panel-body view-hidden" id="segResultBody">
+              <span class="placeholder-text"
+                >Belum ada hasil<br />Model instance segmentation (Mask
+                R-CNN/Detectron2) masih placeholder</span
+              >
+            </div>
+          </div>
+          <div class="panel panel-narrow">
+            <div class="seg-image-tabs">
+              <button
+                type="button"
+                id="segTabDetections"
+                class="seg-image-tab seg-image-tab-active"
+              >
+                Sel Terdeteksi
+              </button>
+              <button type="button" id="segTabFolderResults" class="seg-image-tab">
+                Hasil Folder
+              </button>
+              <button
+                type="button"
+                id="btnSegListResults"
+                class="btn-icon-sm seg-list-refresh"
+                title="Muat ulang daftar hasil di folder ini"
+              >
+                &#8635;
+              </button>
+            </div>
+            <div id="segDetectionsHelp" class="seg-detections-help">
+              Klik sel di gambar atau baris di sini utk pilih, tekan 0-9 ganti
+              kelas cepat, Delete hapus, &uarr;/&darr; pindah sel.
+            </div>
+            <div id="segBulkActionsBar" class="seg-bulk-actions view-hidden">
+              <label class="seg-bulk-select-all">
+                <input type="checkbox" id="segSelectAllCells" /> Pilih semua
+              </label>
+              <select id="segBulkClassSelect" class="seg-class-select"></select>
+              <button type="button" id="btnSegBulkApply" class="btn-icon-sm">
+                Terapkan
+              </button>
+            </div>
+            <div id="segDetectionsBody" class="panel-body-list">
+              <div class="summary-row">Belum ada hasil.</div>
+            </div>
+            <div id="segResultsListHelp" class="seg-detections-help view-hidden">
+              Cuma hasil TERBARU per gambar yang ditampilkan (kalau satu
+              gambar diproses ulang -- individual maupun batch -- hasil
+              lama otomatis digantikan di sini).
+            </div>
+            <input
+              type="text"
+              id="segResultsFilter"
+              class="seg-results-filter view-hidden"
+              placeholder="Filter ID pasien/nama file..."
+            />
+            <div id="segResultsListBody" class="panel-body-list view-hidden">
+              <div class="summary-row">Belum dimuat -- klik &#8635; di atas.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="summary-panel segmentation-class-panel">
+          <div class="summary-header">
+            <span>Ringkasan klasifikasi per kelas sel</span>
+          </div>
+          <div id="classSummaryBody" class="summary-body"></div>
+        </div>
+
+        <div class="summary-panel segmentation-class-panel">
+          <div class="summary-header">
+            <span>Ringkasan per Pasien (folder gambar aktif)</span>
+            <div class="seg-panel-header-actions">
+              <button id="btnSegPatientSummary" class="btn btn-outline btn-sm">
+                Muat Ringkasan
+              </button>
+              <button
+                id="btnSegExportReport"
+                class="btn btn-outline btn-sm"
+                title="Export ringkasan semua pasien di folder ini ke file Excel"
+              >
+                Export Laporan (Excel)
+              </button>
+            </div>
+          </div>
+          <div id="segPatientSummaryBody" class="summary-body">
+            <div class="summary-row">Belum dimuat.</div>
+          </div>
+        </div>
+
+        <div class="summary-panel segmentation-class-panel">
+          <div class="summary-header">
+            <span>Status Model Segmentasi</span>
+          </div>
+          <div class="summary-body">
+            <div id="segModelStatusText" class="seg-model-status-text">
+              Memuat status model...
+            </div>
+            <div class="seg-model-config-row">
+              <input
+                type="text"
+                id="segModelPathInput"
+                placeholder="Path checkpoint model (opsional, buat integrasi nanti)..."
+              />
+              <button id="btnSegSaveModelConfig" class="btn btn-outline btn-sm">
+                Simpan
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-row">
+          <div class="footer-format">
+            Catatan: hasil di atas masih DATA DUMMY/placeholder (model
+            instance segmentation belum dilatih dari RBC Chula dataset).
+            Koreksi manual (kelas, tambah/hapus sel) akan ikut tersimpan
+            kalau klik "Simpan Hasil".
+          </div>
         </div>
       </div>
     </div>
@@ -142,10 +350,7 @@
     <div id="confirmModal" class="modal-overlay modal-hidden">
       <div class="modal-box">
         <div id="confirmModalMessage" class="modal-message"></div>
-        <div class="modal-actions">
-          <button id="confirmModalCancel" class="btn btn-outline">Batal</button>
-          <button id="confirmModalOk" class="btn btn-primary">Lanjutkan</button>
-        </div>
+        <div id="confirmModalActions" class="modal-actions"></div>
       </div>
     </div>
 
