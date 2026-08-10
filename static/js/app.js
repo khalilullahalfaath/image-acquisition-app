@@ -26,6 +26,7 @@ const btnSegZoomIn = document.getElementById("btnSegZoomIn");
 const btnSegZoomOut = document.getElementById("btnSegZoomOut");
 const btnSegZoomReset = document.getElementById("btnSegZoomReset");
 const segZoomLabel = document.getElementById("segZoomLabel");
+const segTotalCellCount = document.getElementById("segTotalCellCount");
 const btnSegPatientSummary = document.getElementById("btnSegPatientSummary");
 const segPatientSummaryBody = document.getElementById("segPatientSummaryBody");
 const btnSegBatchRun = document.getElementById("btnSegBatchRun");
@@ -476,10 +477,22 @@ async function loadClassLegend() {
 
 // counts === null -> tampilan awal (belum ada hasil, semua "-")
 function renderClassSummary(counts) {
+  const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   classSummaryBody.innerHTML = segClassLabels
     .map((c) => {
       const count = counts ? counts[c.label] ?? 0 : null;
-      return `<div class="summary-row"><span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span><span>${count === null ? "&ndash;" : count}</span></div>`;
+      const pct = counts && total > 0 ? (count / total) * 100 : 0;
+      const pctText = counts ? pct.toFixed(1) + "%" : "";
+      return `
+        <div class="summary-row seg-class-summary-row">
+          <span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span>
+          <span class="seg-class-summary-stats">
+            <span>${count === null ? "&ndash;" : count}</span>
+            ${counts ? `<span class="seg-class-pct">(${pctText})</span>` : ""}
+          </span>
+        </div>
+        <div class="seg-class-bar-track"><div class="seg-class-bar-fill" style="width:${pct}%;background:${c.color}"></div></div>
+      `;
     })
     .join("");
 }
@@ -692,6 +705,7 @@ function setActiveCell(cellId) {
 
 function resetSegmentationResults() {
   segDetections = [];
+  updateSegTotalCellCount();
   segActiveCellId = null;
   segAddMode = false;
   segSelectedCellIds = new Set();
@@ -840,29 +854,60 @@ function currentClassIndex(d) {
     : d.classIndex;
 }
 
+// Centroid kasar (rata-rata titik mask) -- cukup akurat buat penempatan
+// label nomor di tengah sel bulat/cembung seperti RBC, nggak perlu hitung
+// centroid area yang lebih presisi.
+function polygonCentroid(mask) {
+  const n = mask.length;
+  let sumX = 0;
+  let sumY = 0;
+  mask.forEach(([x, y]) => {
+    sumX += x;
+    sumY += y;
+  });
+  return [sumX / n, sumY / n];
+}
+
 function renderSegmentationOverlay() {
   const colorFor = (idx) => (segClassLabels[idx] ? segClassLabels[idx].color : "#64748b");
-  const polygons = segDetections
-    .map((d) => {
-      const idx = currentClassIndex(d);
-      const pts = d.mask.map((p) => p.join(",")).join(" ");
-      // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
-      // yang perlu diprioritaskan dicek manual.
-      const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
-      const activeClass = d.id === segActiveCellId ? ' class="seg-polygon-active"' : "";
-      return `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
-    })
-    .join("");
+  // Ukuran font label nomor diskalakan relatif ke dimensi gambar (bukan
+  // ukuran layar) karena SVG viewBox pakai satuan pixel gambar asli --
+  // biar tetap terbaca proporsional baik di gambar kecil maupun besar.
+  const numberFontSize = Math.max(14, Math.round(Math.min(segImgW, segImgH) * 0.018));
+  let polygons = "";
+  let labels = "";
+  segDetections.forEach((d, i) => {
+    const idx = currentClassIndex(d);
+    const pts = d.mask.map((p) => p.join(",")).join(" ");
+    // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
+    // yang perlu diprioritaskan dicek manual.
+    const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
+    const activeClass = d.id === segActiveCellId ? ' class="seg-polygon-active"' : "";
+    polygons += `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
+    // Nomor label ini match sama "Sel #${i+1}" di daftar (renderDetectionsList)
+    // supaya user gampang korelasikan mask di gambar dengan baris di daftar.
+    const [cx, cy] = polygonCentroid(d.mask);
+    labels += `<text class="seg-cell-number-label" data-cell-id="${d.id}" x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="${numberFontSize}">${i + 1}</text>`;
+  });
   segResultBody.innerHTML = `
     <div class="seg-overlay-wrap">
       <img src="${segCurrentImageDataUrl}" alt="hasil segmentasi" />
-      <svg viewBox="0 0 ${segImgW} ${segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}</svg>
+      <svg viewBox="0 0 ${segImgW} ${segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}${labels}</svg>
     </div>
   `;
   applySegZoomTransform();
 }
 
+// Dipanggil tiap kali segDetections berubah (lewat renderDetectionsList,
+// atau manual di resetSegmentationResults) -- biar "Total sel terdeteksi"
+// di seg-tools-row selalu konsisten sama daftar & overlay.
+function updateSegTotalCellCount() {
+  segTotalCellCount.textContent =
+    segDetections.length > 0 ? `Total sel terdeteksi: ${segDetections.length}` : "";
+}
+
 function renderDetectionsList() {
+  updateSegTotalCellCount();
   const detectionsTabActive = segTabDetections.classList.contains("seg-image-tab-active");
   segBulkActionsBar.classList.toggle("view-hidden", segDetections.length === 0 || !detectionsTabActive);
   if (segDetections.length === 0) {
