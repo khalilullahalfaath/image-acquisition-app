@@ -311,21 +311,8 @@ body {
 .seg-overlay-wrap svg polygon.seg-polygon-dimmed { opacity: 0.15; }
 .seg-overlay-wrap svg text.seg-cell-number-label.seg-label-dimmed { opacity: 0.15; }
 
-.seg-total-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2;
-  background: rgba(15, 23, 42, 0.72);
-  color: var(--white);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 6px;
-  pointer-events: none;
-}
-
 .seg-image-tabs { display: flex; gap: 6px; align-items: center; }
+.seg-total-count { font-size: 12px; font-weight: 600; color: var(--slate-500); margin-left: 2px; }
 .seg-list-refresh { margin-left: auto; }
 .seg-image-tab {
   font-size: 12px;

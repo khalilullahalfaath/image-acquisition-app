@@ -29,6 +29,7 @@ const btnSegZoomIn = document.getElementById("btnSegZoomIn");
 const btnSegZoomOut = document.getElementById("btnSegZoomOut");
 const btnSegZoomReset = document.getElementById("btnSegZoomReset");
 const segZoomLabel = document.getElementById("segZoomLabel");
+const segTotalCellCount = document.getElementById("segTotalCellCount");
 const btnSegPatientSummary = document.getElementById("btnSegPatientSummary");
 const segPatientSummaryBody = document.getElementById("segPatientSummaryBody");
 const btnSegBatchRun = document.getElementById("btnSegBatchRun");
@@ -837,6 +838,7 @@ function setActiveCell(cellId) {
 
 function resetSegmentationResults() {
   segDetections = [];
+  updateSegTotalCellCount();
   segHighlightedClassIndex = null;
   segActiveCellId = null;
   segAddMode = false;
@@ -852,6 +854,20 @@ function resetSegmentationResults() {
   renderClassSummary(null);
   btnSaveSegmentation.disabled = true;
   switchSegImageTab("source");
+}
+
+// File hasil Capture disimpan dengan pola "inisial-pasien_timestamp_iterasi.ext"
+// (lihat doSave() -- backend format-nya "{slug}_{timestamp}_{iterasi}").
+// Kalau nama file yang dipilih persis cocok pola ini, tebak inisial
+// pasiennya dari situ -- biar field ID Pasien nggak kosong/ke-lewat pas
+// user pilih gambar langsung dari dialog file (bukan lewat "Kirim ke
+// Segmentasi" dari tab Capture), yang tadinya bikin field itu kosong dan
+// akhirnya tersimpan sebagai "?" di segmentation_log.csv.
+function guessPatientIdFromFilename(pathOrFilename) {
+  const base = (pathOrFilename || "").split(/[\\/]/).pop() || "";
+  const withoutExt = base.replace(/\.[^.]+$/, "");
+  const m = withoutExt.match(/^([a-z0-9-]+)_(\d{8}-\d{6})_(\d+)$/i);
+  return m ? m[1] : "";
 }
 
 async function doSelectSegmentationImage() {
@@ -870,6 +886,7 @@ async function doSelectSegmentationImage() {
   segCurrentImageDataUrl = `data:image/png;base64,${data.image}`;
   segImagePathEl.textContent = "Gambar: " + data.path;
   segSourceBody.innerHTML = `<img src="${segCurrentImageDataUrl}" alt="${data.filename}" />`;
+  segPatientNameInput.value = guessPatientIdFromFilename(data.path || data.filename);
   btnRunSegmentation.disabled = false;
   resetSegmentationResults();
 }
@@ -1024,7 +1041,6 @@ function renderSegmentationOverlay() {
   });
   segResultBody.innerHTML = `
     <div class="seg-overlay-wrap">
-      <div class="seg-total-badge">${segDetections.length} sel terdeteksi</div>
       <img src="${segCurrentImageDataUrl}" alt="hasil segmentasi" />
       <svg viewBox="0 0 ${segImgW} ${segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}${labels}</svg>
     </div>
@@ -1033,7 +1049,14 @@ function renderSegmentationOverlay() {
   applySegClassHighlightToOverlay();
 }
 
+// Dipanggil tiap kali segDetections berubah -- biar jumlah sel di samping
+// tombol "Hasil Segmentasi" selalu konsisten sama daftar sel & overlay.
+function updateSegTotalCellCount() {
+  segTotalCellCount.textContent = segDetections.length > 0 ? `(${segDetections.length} sel)` : "";
+}
+
 function renderDetectionsList() {
+  updateSegTotalCellCount();
   const detectionsTabActive = segTabDetections.classList.contains("seg-image-tab-active");
   segBulkActionsBar.classList.toggle("view-hidden", segDetections.length === 0 || !detectionsTabActive);
   if (segDetections.length === 0) {
