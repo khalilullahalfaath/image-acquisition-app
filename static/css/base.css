@@ -1,0 +1,237 @@
+/*
+ * Base -- variabel warna, reset, topbar/tab/kamera (shared di kedua tab),
+ * dan komponen generik (tombol, badge, panel, ringkasan, toast) yang dipakai
+ * bareng oleh tab Capture maupun Segmentasi. Kalau nambah komponen baru yang
+ * dipakai di lebih dari satu tab, taruh di sini -- kalau cuma dipakai satu
+ * tab, taruh di capture.css atau segmentation.css.
+ */
+
+:root {
+  --white: #ffffff;
+  --slate-800: #1e293b;
+  --slate-500: #64748b;
+  --slate-400: #94a3b8;
+  --slate-300: #cbd5e1;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --slate-50: #f8fafc;
+  --blue-600: #2563eb;
+  --blue-50: #eff6ff;
+  --blue-700: #1d4ed8;
+  --green-600: #16a34a;
+  --green-50: #f0fdf4;
+  --red-500: #ef4444;
+  --amber-500: #f59e0b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Segoe UI", Inter, Arial, sans-serif;
+  background: var(--slate-50);
+  color: var(--slate-800);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--white);
+  border-bottom: 1px solid var(--slate-100);
+  padding: 12px 40px;
+}
+
+.tab-group { display: flex; gap: 6px; }
+
+.tab {
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab-active { background: var(--blue-600); color: var(--white); }
+.tab-disabled { color: var(--slate-400); cursor: not-allowed; }
+
+.camera-group { display: flex; align-items: center; gap: 10px; }
+.camera-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot-off { background: var(--slate-400); }
+.dot-on { background: var(--green-600); }
+.dot-live { background: var(--red-500); }
+.dot-idle { background: var(--slate-400); }
+
+.camera-select {
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+}
+
+.page { max-width: 1240px; margin: 0 auto; padding: 24px 40px 40px; }
+
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.patient-field label {
+  display: block;
+  font-size: 13px;
+  color: var(--slate-500);
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.patient-field input {
+  width: 320px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--slate-300);
+  font-size: 13px;
+}
+
+.future-cards { display: flex; gap: 16px; }
+.future-card {
+  width: 200px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--blue-50);
+  border: 1px dashed #bfdbfe;
+  text-align: center;
+}
+.future-title { font-size: 13px; font-weight: 700; color: var(--blue-700); }
+.future-sub { font-size: 11px; color: #5b7fd4; margin-top: 4px; }
+
+.toolbar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.toolbar-right { display: flex; gap: 12px; }
+
+.btn {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--blue-600); color: var(--white); }
+.btn-success { background: var(--green-600); color: var(--white); }
+.btn-outline { background: var(--white); border-color: var(--slate-300); color: var(--slate-800); }
+.btn-icon { padding: 10px 12px; font-size: 14px; line-height: 1; }
+
+.folder-path { font-size: 12px; color: var(--slate-500); margin-bottom: 20px; min-height: 16px; }
+
+.panels-row { display: flex; gap: 24px; }
+
+.panel {
+  flex: 1;
+  background: var(--white);
+  border: 1px solid var(--slate-200);
+  border-radius: 14px;
+  padding: 16px 20px;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-title-row { display: flex; justify-content: space-between; align-items: center; }
+.panel-title { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.badge-hidden { display: none; }
+.badge-unsaved { background: #fef3c7; color: #92400e; display: inline-block; }
+.badge-saved { background: var(--green-50); color: #166534; display: inline-block; }
+.badge-focus-good { background: var(--green-50); color: #166534; display: inline-block; }
+.badge-focus-bad { background: #fee2e2; color: #991b1b; display: inline-block; }
+.badge-blank-warning { background: #fee2e2; color: #991b1b; display: inline-block; }
+
+.badge-group { display: flex; gap: 8px; align-items: center; }
+
+.panel-body {
+  flex: 1;
+  margin-top: 12px;
+  border-radius: 10px;
+  background: var(--slate-50);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.panel-body img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+.placeholder-text { font-size: 13px; color: var(--slate-500); text-align: center; padding: 0 24px; }
+
+.footer-row { margin-top: 24px; }
+.footer-count { font-size: 13px; font-weight: 700; }
+.footer-format { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+
+.toast {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--green-50);
+  color: #166534;
+  border: 1px solid #b7ebc6;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: opacity 0.2s ease;
+}
+.toast-hidden { opacity: 0; pointer-events: none; }
+
+.summary-panel {
+  background: var(--white);
+  border: 1px solid var(--slate-200);
+  border-radius: 10px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.summary-hidden { display: none; }
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--slate-50);
+  font-size: 13px;
+  font-weight: 600;
+}
+.summary-close {
+  border: none;
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--slate-500);
+}
+.summary-body { padding: 12px 16px; font-size: 13px; }
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--slate-100);
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-total { font-weight: 600; margin-top: 8px; }
+
+/* Utility "sembunyikan elemen" -- !important supaya nggak bisa ketiban
+   aturan display lain yang punya specificity sama tapi datang belakangan di
+   file (mis. .seg-bulk-actions { display:flex }), yang pernah bikin bug
+   checkbox bulk masih kelihatan pas seharusnya disembunyikan. */
+.view-hidden { display: none !important; }

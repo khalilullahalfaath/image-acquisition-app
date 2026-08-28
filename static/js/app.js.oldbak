@@ -21,15 +21,11 @@ const segSourceBody = document.getElementById("segSourceBody");
 const segResultBody = document.getElementById("segResultBody");
 const segDetectionsBody = document.getElementById("segDetectionsBody");
 const classSummaryBody = document.getElementById("classSummaryBody");
-const classChartBody = document.getElementById("classChartBody");
-const segClassTabTable = document.getElementById("segClassTabTable");
-const segClassTabChart = document.getElementById("segClassTabChart");
 const btnSegAddCell = document.getElementById("btnSegAddCell");
 const btnSegZoomIn = document.getElementById("btnSegZoomIn");
 const btnSegZoomOut = document.getElementById("btnSegZoomOut");
 const btnSegZoomReset = document.getElementById("btnSegZoomReset");
 const segZoomLabel = document.getElementById("segZoomLabel");
-const segTotalCellCount = document.getElementById("segTotalCellCount");
 const btnSegPatientSummary = document.getElementById("btnSegPatientSummary");
 const segPatientSummaryBody = document.getElementById("segPatientSummaryBody");
 const btnSegBatchRun = document.getElementById("btnSegBatchRun");
@@ -88,7 +84,6 @@ let segImgH = 0;
 let segActiveFolder = null; // folder "aktif" buat Ringkasan per Pasien & Muat Daftar -- dari gambar terakhir dipilih/dimuat ATAU folder Proses Batch terakhir
 let segActiveCellId = null; // id sel yang lagi dipilih (row diklik / navigasi panah)
 let segAddMode = false; // true kalau lagi mode "Tambah Sel Manual"
-let segHighlightedClassIndex = null; // kelas yang lagi di-highlight (klik baris/bar di ringkasan kelas)
 let segSelectedCellIds = new Set(); // dipakai buat koreksi kelas massal (bulk)
 let segResultsListCache = []; // cache hasil terakhir dari list-results, buat filter tanpa fetch ulang
 
@@ -481,142 +476,12 @@ async function loadClassLegend() {
 
 // counts === null -> tampilan awal (belum ada hasil, semua "-")
 function renderClassSummary(counts) {
-  if (!counts) segHighlightedClassIndex = null; // reset kalau panel di-clear (belum ada hasil)
-  const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   classSummaryBody.innerHTML = segClassLabels
     .map((c) => {
       const count = counts ? counts[c.label] ?? 0 : null;
-      const pct = counts && total > 0 ? (count / total) * 100 : 0;
-      const pctText = counts ? pct.toFixed(1) + "%" : "";
-      // Baris cuma bisa diklik kalau sudah ada hasil (counts != null) -- klik
-      // toggle highlight kelas itu di overlay gambar (lihat toggleClassHighlight).
-      const clickable = counts ? " seg-class-clickable" : "";
-      const active = counts && segHighlightedClassIndex === c.index ? " seg-class-row-active" : "";
-      return `
-        <div class="summary-row seg-class-summary-row${clickable}${active}" data-class-index="${c.index}">
-          <span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span>
-          <span class="seg-class-summary-stats">
-            <span>${count === null ? "&ndash;" : count}</span>
-            ${counts ? `<span class="seg-class-pct">(${pctText})</span>` : ""}
-          </span>
-        </div>
-      `;
+      return `<div class="summary-row"><span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span><span>${count === null ? "&ndash;" : count}</span></div>`;
     })
     .join("");
-
-  if (counts) {
-    classSummaryBody.querySelectorAll(".seg-class-clickable").forEach((el) => {
-      el.addEventListener("click", () => toggleClassHighlight(parseInt(el.dataset.classIndex, 10)));
-    });
-  }
-  renderClassChart(counts);
-}
-
-// Pembulatan "nice" buat jarak antar gridline sumbu Y (0/1/2/5x10^n) --
-// pola umum di library chart, biar angka di sumbu gampang dibaca (bukan
-// pecahan aneh kayak 0, 3.33, 6.67).
-function niceTickStep(maxValue, targetTicks = 5) {
-  if (maxValue <= 0) return 1;
-  const raw = maxValue / targetTicks;
-  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / magnitude;
-  let step;
-  if (norm < 1.5) step = 1;
-  else if (norm < 3) step = 2;
-  else if (norm < 7) step = 5;
-  else step = 10;
-  return step * magnitude;
-}
-
-// Grafik batang vertikal (SVG, tanpa library eksternal) buat ringkasan
-// klasifikasi per kelas -- pelengkap tampilan Tabel, biar sekali lihat
-// langsung kebaca kelas mana yang dominan.
-function renderClassChart(counts) {
-  if (!counts) {
-    classChartBody.innerHTML =
-      '<span class="placeholder-text">Belum ada hasil untuk ditampilkan sebagai grafik.</span>';
-    return;
-  }
-
-  const chartW = 820;
-  const chartH = 340;
-  const marginLeft = 34;
-  const marginRight = 10;
-  const marginTop = 20;
-  const marginBottom = 96;
-  const plotW = chartW - marginLeft - marginRight;
-  const plotH = chartH - marginTop - marginBottom;
-
-  const n = segClassLabels.length;
-  const maxCount = Math.max(1, ...segClassLabels.map((c) => counts[c.label] ?? 0));
-  const tickStep = niceTickStep(maxCount);
-  const niceMax = Math.max(tickStep, Math.ceil(maxCount / tickStep) * tickStep);
-  const ticks = [];
-  for (let t = 0; t <= niceMax; t += tickStep) ticks.push(t);
-
-  const gridlines = ticks
-    .map((t) => {
-      const y = marginTop + plotH - (t / niceMax) * plotH;
-      return `
-        <line x1="${marginLeft}" y1="${y}" x2="${marginLeft + plotW}" y2="${y}" stroke="var(--slate-200)" stroke-width="1" />
-        <text x="${marginLeft - 6}" y="${y}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="var(--slate-500)">${t}</text>
-      `;
-    })
-    .join("");
-
-  const barGap = 10;
-  const barW = (plotW - barGap * (n - 1)) / n;
-  const bars = segClassLabels
-    .map((c, i) => {
-      const count = counts[c.label] ?? 0;
-      const barH = (count / niceMax) * plotH;
-      const x = marginLeft + i * (barW + barGap);
-      const y = marginTop + plotH - barH;
-      const labelX = x + barW / 2;
-      const dimmed =
-        segHighlightedClassIndex !== null && segHighlightedClassIndex !== c.index ? ' opacity="0.35"' : "";
-      const active = segHighlightedClassIndex === c.index ? ' class="seg-class-bar-active"' : "";
-      return `
-        <g class="seg-class-chart-bar-group seg-class-clickable" data-class-index="${c.index}">
-          <rect x="${x}" y="${y}" width="${barW}" height="${Math.max(barH, 0)}" fill="${c.color}" rx="3"${dimmed}${active} />
-          <rect x="${x}" y="${marginTop}" width="${barW}" height="${plotH}" fill="transparent" />
-          ${count > 0 ? `<text x="${labelX}" y="${y - 4}" text-anchor="middle" font-size="11" font-weight="600" fill="var(--slate-800)">${count}</text>` : ""}
-          <text x="${labelX}" y="${marginTop + plotH + 14}" text-anchor="end" font-size="10" fill="var(--slate-500)" transform="rotate(-40 ${labelX} ${marginTop + plotH + 14})">${c.label}</text>
-        </g>
-      `;
-    })
-    .join("");
-
-  const axisLine = `<line x1="${marginLeft}" y1="${marginTop + plotH}" x2="${marginLeft + plotW}" y2="${marginTop + plotH}" stroke="var(--slate-400)" stroke-width="1.5" />`;
-
-  classChartBody.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="seg-class-chart-svg">${gridlines}${bars}${axisLine}</svg>`;
-
-  classChartBody.querySelectorAll(".seg-class-clickable").forEach((el) => {
-    el.addEventListener("click", () => toggleClassHighlight(parseInt(el.dataset.classIndex, 10)));
-  });
-}
-
-// Klik baris/bar kelas di ringkasan -> highlight (dim yang lain) sel kelas
-// itu di overlay Hasil Segmentasi. Klik lagi kelas yang sama -> matikan lagi.
-function toggleClassHighlight(classIndex) {
-  segHighlightedClassIndex = segHighlightedClassIndex === classIndex ? null : classIndex;
-  updateClassSummaryFromDetections(); // render ulang tabel + grafik dgn state highlight terbaru
-  applySegClassHighlightToOverlay();
-}
-
-function applySegClassHighlightToOverlay() {
-  const svg = segResultBody.querySelector("svg");
-  if (!svg) return;
-  svg.querySelectorAll("polygon[data-cell-id]").forEach((p) => {
-    const det = segDetections.find((d) => d.id === parseInt(p.dataset.cellId, 10));
-    const idx = det ? currentClassIndex(det) : null;
-    p.classList.toggle("seg-polygon-dimmed", segHighlightedClassIndex !== null && idx !== segHighlightedClassIndex);
-  });
-  svg.querySelectorAll("text.seg-cell-number-label").forEach((t) => {
-    const det = segDetections.find((d) => d.id === parseInt(t.dataset.cellId, 10));
-    const idx = det ? currentClassIndex(det) : null;
-    t.classList.toggle("seg-label-dimmed", segHighlightedClassIndex !== null && idx !== segHighlightedClassIndex);
-  });
 }
 
 function updateClassSummaryFromDetections() {
@@ -638,17 +503,6 @@ function switchSegImageTab(tab) {
   segTabResult.classList.toggle("seg-image-tab-active", !isSource);
   segSourceBody.classList.toggle("view-hidden", !isSource);
   segResultBody.classList.toggle("view-hidden", isSource);
-}
-
-// Tab kecil di panel Ringkasan klasifikasi (Tabel <-> Grafik) -- tabel tetap
-// jadi tampilan utama/default (persis kayak sebelumnya), grafik batang cuma
-// visualisasi tambahan yang lebih gampang dibaca sekilas.
-function switchSegClassTab(tab) {
-  const isTable = tab === "table";
-  segClassTabTable.classList.toggle("seg-image-tab-active", isTable);
-  segClassTabChart.classList.toggle("seg-image-tab-active", !isTable);
-  classSummaryBody.classList.toggle("view-hidden", !isTable);
-  classChartBody.classList.toggle("view-hidden", isTable);
 }
 
 // Tab kecil di panel kanan (Sel Terdeteksi <-> Hasil Folder) -- digabung di
@@ -838,8 +692,6 @@ function setActiveCell(cellId) {
 
 function resetSegmentationResults() {
   segDetections = [];
-  updateSegTotalCellCount();
-  segHighlightedClassIndex = null;
   segActiveCellId = null;
   segAddMode = false;
   segSelectedCellIds = new Set();
@@ -854,20 +706,6 @@ function resetSegmentationResults() {
   renderClassSummary(null);
   btnSaveSegmentation.disabled = true;
   switchSegImageTab("source");
-}
-
-// File hasil Capture disimpan dengan pola "inisial-pasien_timestamp_iterasi.ext"
-// (lihat doSave() -- backend format-nya "{slug}_{timestamp}_{iterasi}").
-// Kalau nama file yang dipilih persis cocok pola ini, tebak inisial
-// pasiennya dari situ -- biar field ID Pasien nggak kosong/ke-lewat pas
-// user pilih gambar langsung dari dialog file (bukan lewat "Kirim ke
-// Segmentasi" dari tab Capture), yang tadinya bikin field itu kosong dan
-// akhirnya tersimpan sebagai "?" di segmentation_log.csv.
-function guessPatientIdFromFilename(pathOrFilename) {
-  const base = (pathOrFilename || "").split(/[\\/]/).pop() || "";
-  const withoutExt = base.replace(/\.[^.]+$/, "");
-  const m = withoutExt.match(/^([a-z0-9-]+)_(\d{8}-\d{6})_(\d+)$/i);
-  return m ? m[1] : "";
 }
 
 async function doSelectSegmentationImage() {
@@ -886,7 +724,6 @@ async function doSelectSegmentationImage() {
   segCurrentImageDataUrl = `data:image/png;base64,${data.image}`;
   segImagePathEl.textContent = "Gambar: " + data.path;
   segSourceBody.innerHTML = `<img src="${segCurrentImageDataUrl}" alt="${data.filename}" />`;
-  segPatientNameInput.value = guessPatientIdFromFilename(data.path || data.filename);
   btnRunSegmentation.disabled = false;
   resetSegmentationResults();
 }
@@ -898,13 +735,7 @@ async function doSelectSegmentationImage() {
 function applyLoadedSegmentationResult(data) {
   segSelectedPath = data.path;
   if (data.path) segActiveFolder = segFolderOf(data.path);
-  // Hasil lama yang disimpan sebelum inisial pasien wajib/otomatis terisi
-  // bisa aja patientId-nya kosong -- coba tebak dari nama file gambar
-  // sumbernya (lihat guessPatientIdFromFilename) daripada dibiarkan kosong.
-  segPatientNameInput.value =
-    data.patientId && data.patientId !== "?"
-      ? data.patientId
-      : guessPatientIdFromFilename(data.path) || guessPatientIdFromFilename(data.detailFile);
+  segPatientNameInput.value = data.patientId || "";
   segImagePathEl.textContent = data.path
     ? "Gambar: " + data.path + (data.detailFile ? ` (dimuat dari ${data.detailFile})` : "")
     : `Dimuat dari ${data.detailFile} (path gambar sumber tidak tercatat)`;
@@ -916,7 +747,6 @@ function applyLoadedSegmentationResult(data) {
   }));
   segActiveCellId = null;
   segAddMode = false;
-  segHighlightedClassIndex = null;
   segSelectedCellIds = new Set();
   segSelectAllCells.checked = false;
   btnSegAddCell.classList.remove("btn-toggle-active");
@@ -1010,60 +840,29 @@ function currentClassIndex(d) {
     : d.classIndex;
 }
 
-// Centroid kasar (rata-rata titik mask) -- cukup akurat buat penempatan
-// label nomor di tengah sel bulat/cembung seperti RBC, nggak perlu hitung
-// centroid area yang lebih presisi.
-function polygonCentroid(mask) {
-  const n = mask.length;
-  let sumX = 0;
-  let sumY = 0;
-  mask.forEach(([x, y]) => {
-    sumX += x;
-    sumY += y;
-  });
-  return [sumX / n, sumY / n];
-}
-
 function renderSegmentationOverlay() {
   const colorFor = (idx) => (segClassLabels[idx] ? segClassLabels[idx].color : "#64748b");
-  // Ukuran font label nomor diskalakan relatif ke dimensi gambar (bukan
-  // ukuran layar) karena SVG viewBox pakai satuan pixel gambar asli --
-  // biar tetap terbaca proporsional baik di gambar kecil maupun besar.
-  const numberFontSize = Math.max(14, Math.round(Math.min(segImgW, segImgH) * 0.018));
-  let polygons = "";
-  let labels = "";
-  segDetections.forEach((d, i) => {
-    const idx = currentClassIndex(d);
-    const pts = d.mask.map((p) => p.join(",")).join(" ");
-    // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
-    // yang perlu diprioritaskan dicek manual.
-    const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
-    const activeClass = d.id === segActiveCellId ? ' class="seg-polygon-active"' : "";
-    polygons += `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
-    // Nomor label ini match sama "Sel #${i+1}" di daftar (renderDetectionsList)
-    // supaya user gampang korelasikan mask di gambar dengan baris di daftar.
-    const [cx, cy] = polygonCentroid(d.mask);
-    labels += `<text class="seg-cell-number-label" data-cell-id="${d.id}" x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="${numberFontSize}">${i + 1}</text>`;
-  });
+  const polygons = segDetections
+    .map((d) => {
+      const idx = currentClassIndex(d);
+      const pts = d.mask.map((p) => p.join(",")).join(" ");
+      // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
+      // yang perlu diprioritaskan dicek manual.
+      const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
+      const activeClass = d.id === segActiveCellId ? ' class="seg-polygon-active"' : "";
+      return `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
+    })
+    .join("");
   segResultBody.innerHTML = `
     <div class="seg-overlay-wrap">
       <img src="${segCurrentImageDataUrl}" alt="hasil segmentasi" />
-      <svg viewBox="0 0 ${segImgW} ${segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}${labels}</svg>
+      <svg viewBox="0 0 ${segImgW} ${segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}</svg>
     </div>
   `;
   applySegZoomTransform();
-  applySegClassHighlightToOverlay();
-}
-
-// Dipanggil tiap kali segDetections berubah -- biar jumlah sel di samping
-// tombol "Hasil Segmentasi" selalu konsisten sama daftar sel & overlay.
-function updateSegTotalCellCount() {
-  segTotalCellCount.textContent =
-    segDetections.length > 0 ? `Jumlah sel terdeteksi: ${segDetections.length} sel` : "";
 }
 
 function renderDetectionsList() {
-  updateSegTotalCellCount();
   const detectionsTabActive = segTabDetections.classList.contains("seg-image-tab-active");
   segBulkActionsBar.classList.toggle("view-hidden", segDetections.length === 0 || !detectionsTabActive);
   if (segDetections.length === 0) {
@@ -1196,7 +995,6 @@ async function doRunSegmentation() {
   }));
   segActiveCellId = null;
   segAddMode = false;
-  segHighlightedClassIndex = null;
   segSelectedCellIds = new Set();
   segSelectAllCells.checked = false;
   btnSegAddCell.classList.remove("btn-toggle-active");
@@ -1212,16 +1010,6 @@ async function doRunSegmentation() {
 
 async function doSaveSegmentation() {
   if (!segSelectedPath || segDetections.length === 0) return;
-  await trySaveSegmentation(false);
-}
-
-// force=false: cek dulu ke server apakah hasil ini persis sama (jumlah sel
-// per kelas identik) dengan hasil TERAKHIR yang sudah tersimpan buat gambar
-// ini -- kalau iya, server belum nulis apa-apa & balikin needsConfirmation,
-// baru di sini ditanya ke user mau tetap disimpan sebagai duplikat atau
-// tidak (force=true buat beneran nulis). Ini nyegah folder numpuk banyak
-// file JSON isinya sama persis tanpa disadari user.
-async function trySaveSegmentation(force) {
   btnSaveSegmentation.disabled = true;
   btnSaveSegmentation.textContent = "Menyimpan...";
 
@@ -1232,7 +1020,6 @@ async function trySaveSegmentation(force) {
       path: segSelectedPath,
       patientId: segPatientNameInput.value.trim(),
       detections: segDetections,
-      force,
     }),
   });
   const data = await res.json();
@@ -1243,20 +1030,8 @@ async function trySaveSegmentation(force) {
     showToast(data.message || "Gagal menyimpan hasil.");
     return;
   }
-
-  if (data.needsConfirmation) {
-    const lanjut = await showConfirmModal(
-      `Hasil ini sama persis (jumlah sel per kelas identik) dengan hasil tersimpan ` +
-      `terakhir untuk gambar ini (${data.lastDetailFile}, ${data.lastTimestamp}).\n\n` +
-      `Simpan lagi sebagai duplikat?`
-    );
-    if (lanjut) await trySaveSegmentation(true);
-    return;
-  }
-
-  const dupNote = data.isDuplicate ? " (ditandai duplikat)" : "";
   showToast(
-    `Tersimpan (${data.totalCells} sel)${dupNote} -- lihat segmentation_log.csv di folder gambar sumber.`
+    `Tersimpan (${data.totalCells} sel) -- lihat segmentation_log.csv di folder gambar sumber.`
   );
 }
 
@@ -1343,25 +1118,9 @@ function renderSegResultsList(results) {
     .map((r) => {
       const filename = r.sourceImage ? r.sourceImage.split(/[\\/]/).pop() : r.detailFile;
       const patientTag = r.patientId && r.patientId !== "?" ? ` (${r.patientId})` : "";
-      // Baris kedua nunjukin nama file JSON detail aslinya (persis kayak di
-      // File Explorer/folder gambar) -- biar jelas file mana persisnya yang
-      // dipakai buat gambar ini, nggak cuma nama gambar sumbernya.
-      const fileSubtitle =
-        r.detailFile && r.detailFile !== filename
-          ? `<span class="seg-result-list-file" title="${r.detailFile}">${r.detailFile}</span>`
-          : "";
-      // Hasil yang jumlah sel per kelasnya PERSIS SAMA dengan hasil
-      // sebelumnya (lihat check duplikat di doSaveSegmentation) ditandai di
-      // sini, biar kelihatan sekilas mana yang kemungkinan nggak perlu.
-      const dupTag = r.isDuplicate
-        ? ` <span class="seg-duplicate-tag" title="${r.duplicateOfFile ? "Sama dengan: " + r.duplicateOfFile : ""}">duplikat</span>`
-        : "";
       return `
         <div class="summary-row seg-result-list-row" data-path="${r.detailPath}">
-          <div class="seg-result-list-main">
-            <span class="seg-result-list-title">${filename}${patientTag}${dupTag}</span>
-            ${fileSubtitle}
-          </div>
+          <span>${filename}${patientTag}</span>
           <span>${r.totalCells} sel</span>
         </div>
       `;
@@ -1591,31 +1350,6 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-// -----------------------------------------------------------------------
-// Shortcut keyboard buat tab Capture: Spasi = Capture, Enter = Save
-// -----------------------------------------------------------------------
-window.addEventListener("keydown", (e) => {
-  if (captureView.classList.contains("view-hidden")) return;
-  const active = document.activeElement;
-  const tag = active ? active.tagName : "";
-  const isPatientNameField = active === patientNameInput;
-
-  if (e.key === " " || e.code === "Space") {
-    // Jangan sikat spasi kalau lagi ngetik (mis. inisial pasien 2 kata)
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-    e.preventDefault();
-    if (!btnCapture.disabled) doCapture();
-    return;
-  }
-  if (e.key === "Enter") {
-    // Enter aman dipakai walau fokus di field inisial pasien (input teks
-    // biasa tanpa <form>, jadi Enter nggak ada default action)
-    if ((tag === "SELECT" || tag === "TEXTAREA") && !isPatientNameField) return;
-    e.preventDefault();
-    if (!btnSave.disabled) doSave();
-  }
-});
-
 tabCapture.addEventListener("click", () => switchTab("capture"));
 tabSegmentation.addEventListener("click", () => switchTab("segmentation"));
 btnSegSelectImage.addEventListener("click", doSelectSegmentationImage);
@@ -1625,8 +1359,6 @@ btnSaveSegmentation.addEventListener("click", doSaveSegmentation);
 btnSendToSegmentation.addEventListener("click", sendCaptureToSegmentation);
 segTabSource.addEventListener("click", () => switchSegImageTab("source"));
 segTabResult.addEventListener("click", () => switchSegImageTab("result"));
-segClassTabTable.addEventListener("click", () => switchSegClassTab("table"));
-segClassTabChart.addEventListener("click", () => switchSegClassTab("chart"));
 segTabDetections.addEventListener("click", () => switchSegListTab("detections"));
 segTabFolderResults.addEventListener("click", doLoadSegResultsListButton);
 

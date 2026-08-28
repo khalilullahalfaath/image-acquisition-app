@@ -932,9 +932,7 @@ def api_segmentation_run():
         "ok": True,
         "mock": True,
         "message": (
-            "Hasil DUMMY/placeholder -- model instance segmentation "
-            "(Mask R-CNN/Detectron2) belum dilatih. Ini cuma buat menguji "
-            "alur UI-nya duluan."
+            "Hasil DUMMY/Placeholder"
         ),
         "imageWidth": width,
         "imageHeight": height,

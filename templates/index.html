@@ -69,7 +69,9 @@
             &#9679; Capture
           </button>
           <div class="toolbar-right">
-            <button id="btnFolder" class="btn btn-outline">Lokasi Simpan</button>
+            <button id="btnFolder" class="btn btn-outline">
+              Lokasi Simpan
+            </button>
             <button id="btnSummary" class="btn btn-outline" disabled>
               Ringkasan Folder
             </button>
@@ -101,8 +103,8 @@
             </div>
             <div class="panel-body" id="streamBody">
               <span class="placeholder-text"
-                >Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop untuk
-                memulai</span
+                >Kamera tidak terhubung<br />Hubungkan kamera USB mikroskop
+                untuk memulai</span
               >
             </div>
           </div>
@@ -127,7 +129,9 @@
         <div class="gallery-row">
           <div class="gallery-title">Riwayat tersimpan sesi ini</div>
           <div id="galleryStrip" class="gallery-strip">
-            <span class="gallery-empty">Belum ada yang disimpan di sesi ini.</span>
+            <span class="gallery-empty"
+              >Belum ada yang disimpan di sesi ini.</span
+            >
           </div>
         </div>
 
@@ -144,13 +148,11 @@
       <div id="segmentationView" class="view view-hidden">
         <div class="header-row">
           <div class="patient-field">
-            <label for="segPatientName"
-              >ID Pasien (opsional, ikut tersimpan di hasil)</label
-            >
+            <label for="segPatientName">Inisial Pasien</label>
             <input
               id="segPatientName"
               type="text"
-              placeholder="Masukkan ID pasien..."
+              placeholder="Masukkan Inisial pasien..."
             />
           </div>
         </div>
@@ -197,10 +199,31 @@
             + Tambah Sel Manual
           </button>
           <div class="seg-zoom-controls">
-            <button type="button" id="btnSegZoomOut" class="btn-icon-sm" title="Perkecil">&minus;</button>
+            <button
+              type="button"
+              id="btnSegZoomOut"
+              class="btn-icon-sm"
+              title="Perkecil"
+            >
+              &minus;
+            </button>
             <span id="segZoomLabel" class="seg-zoom-label">100%</span>
-            <button type="button" id="btnSegZoomIn" class="btn-icon-sm" title="Perbesar">+</button>
-            <button type="button" id="btnSegZoomReset" class="btn-icon-sm" title="Reset zoom">Reset</button>
+            <button
+              type="button"
+              id="btnSegZoomIn"
+              class="btn-icon-sm"
+              title="Perbesar"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              id="btnSegZoomReset"
+              class="btn-icon-sm"
+              title="Reset zoom"
+            >
+              Reset
+            </button>
           </div>
         </div>
 
@@ -227,8 +250,7 @@
             </div>
             <div class="panel-body view-hidden" id="segResultBody">
               <span class="placeholder-text"
-                >Belum ada hasil<br />Model instance segmentation (Mask
-                R-CNN/Detectron2) masih placeholder</span
+                >Belum ada hasil<br />Model instance segmentation masih placeholder</span
               >
             </div>
           </div>
@@ -241,7 +263,11 @@
               >
                 Sel Terdeteksi
               </button>
-              <button type="button" id="segTabFolderResults" class="seg-image-tab">
+              <button
+                type="button"
+                id="segTabFolderResults"
+                class="seg-image-tab"
+              >
                 Hasil Folder
               </button>
               <button
@@ -269,10 +295,13 @@
             <div id="segDetectionsBody" class="panel-body-list">
               <div class="summary-row">Belum ada hasil.</div>
             </div>
-            <div id="segResultsListHelp" class="seg-detections-help view-hidden">
-              Cuma hasil TERBARU per gambar yang ditampilkan (kalau satu
-              gambar diproses ulang -- individual maupun batch -- hasil
-              lama otomatis digantikan di sini).
+            <div
+              id="segResultsListHelp"
+              class="seg-detections-help view-hidden"
+            >
+              Cuma hasil TERBARU per gambar yang ditampilkan (kalau satu gambar
+              diproses ulang, individual maupun batch, hasil lama otomatis
+              digantikan di sini).
             </div>
             <input
               type="text"
@@ -281,7 +310,9 @@
               placeholder="Filter ID pasien/nama file..."
             />
             <div id="segResultsListBody" class="panel-body-list view-hidden">
-              <div class="summary-row">Belum dimuat -- klik &#8635; di atas.</div>
+              <div class="summary-row">
+                Belum dimuat, klik &#8635; di atas.
+              </div>
             </div>
           </div>
         </div>
@@ -290,8 +321,16 @@
           <div class="summary-header">
             <span>Ringkasan klasifikasi per kelas sel</span>
             <div class="seg-panel-header-actions">
-              <button type="button" id="segClassTabTable" class="seg-image-tab seg-image-tab-active">Tabel</button>
-              <button type="button" id="segClassTabChart" class="seg-image-tab">Grafik</button>
+              <button
+                type="button"
+                id="segClassTabTable"
+                class="seg-image-tab seg-image-tab-active"
+              >
+                Tabel
+              </button>
+              <button type="button" id="segClassTabChart" class="seg-image-tab">
+                Grafik
+              </button>
             </div>
           </div>
           <div id="classSummaryBody" class="summary-body"></div>
@@ -342,10 +381,7 @@
 
         <div class="footer-row">
           <div class="footer-format">
-            Catatan: hasil di atas masih DATA DUMMY/placeholder (model
-            instance segmentation belum dilatih dari RBC Chula dataset).
-            Koreksi manual (kelas, tambah/hapus sel) akan ikut tersimpan
-            kalau klik "Simpan Hasil".
+            Catatan: hasil di atas masih DATA DUMMY.
           </div>
         </div>
       </div>

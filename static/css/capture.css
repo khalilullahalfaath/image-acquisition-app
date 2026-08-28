@@ -1,0 +1,35 @@
+/*
+ * Khusus tab Capture -- nama file hasil capture & galeri riwayat sesi.
+ */
+
+.capture-filename { font-size: 12px; color: var(--slate-500); text-align: center; margin-top: 8px; }
+
+.gallery-row { margin-top: 20px; }
+.gallery-title { font-size: 12px; font-weight: 600; color: var(--slate-500); margin-bottom: 8px; }
+.gallery-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.gallery-empty { font-size: 12px; color: var(--slate-400); }
+.gallery-item {
+  flex: 0 0 auto;
+  width: 84px;
+  text-align: center;
+}
+.gallery-item img {
+  width: 84px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--slate-200);
+}
+.gallery-item .gallery-label {
+  font-size: 10px;
+  color: var(--slate-500);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
