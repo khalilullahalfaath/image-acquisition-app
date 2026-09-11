@@ -13,6 +13,7 @@ export const segState = {
   segActiveFolder: null, // folder "aktif" buat Ringkasan per Pasien & Muat Daftar -- dari gambar terakhir dipilih/dimuat ATAU folder Proses Batch terakhir
   segActiveCellId: null, // id sel yang lagi dipilih (row diklik / navigasi panah)
   segAddMode: false, // true kalau lagi mode "Tambah Sel Manual"
+  segHighlightedClassIndex: null, // kelas yang lagi di-highlight (klik baris/bar di ringkasan kelas)
   segSelectedCellIds: new Set(), // dipakai buat koreksi kelas massal (bulk)
   segResultsListCache: [], // cache hasil terakhir dari list-results, buat filter tanpa fetch ulang
 

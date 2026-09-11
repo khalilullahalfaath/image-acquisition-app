@@ -4,16 +4,18 @@ import {
   btnSaveSegmentation, segSelectAllCells, segDetectionsBody, segBulkActionsBar,
 } from "../dom.js";
 import { segState } from "./state.js";
-import { segFolderOf } from "./utils.js";
+import { segFolderOf, guessPatientIdFromFilename } from "./utils.js";
 import { switchSegImageTab } from "./tabs.js";
 import {
   renderSegmentationOverlay, renderDetectionsList, updateClassSummaryFromDetections,
-  renderClassSummary, resetSegZoom,
+  renderClassSummary, resetSegZoom, updateSegTotalCellCount,
 } from "./detections.js";
 import { showConfirmModal, showToast } from "../modal.js";
 
 export function resetSegmentationResults() {
   segState.segDetections = [];
+  updateSegTotalCellCount();
+  segState.segHighlightedClassIndex = null;
   segState.segActiveCellId = null;
   segState.segAddMode = false;
   segState.segSelectedCellIds = new Set();
@@ -46,6 +48,7 @@ export async function doSelectSegmentationImage() {
   segState.segCurrentImageDataUrl = `data:image/png;base64,${data.image}`;
   segImagePathEl.textContent = "Gambar: " + data.path;
   segSourceBody.innerHTML = `<img src="${segState.segCurrentImageDataUrl}" alt="${data.filename}" />`;
+  segPatientNameInput.value = guessPatientIdFromFilename(data.path || data.filename);
   btnRunSegmentation.disabled = false;
   resetSegmentationResults();
 }
@@ -57,7 +60,13 @@ export async function doSelectSegmentationImage() {
 export function applyLoadedSegmentationResult(data) {
   segState.segSelectedPath = data.path;
   if (data.path) segState.segActiveFolder = segFolderOf(data.path);
-  segPatientNameInput.value = data.patientId || "";
+  // Hasil lama yang disimpan sebelum inisial pasien wajib/otomatis terisi
+  // bisa aja patientId-nya kosong -- coba tebak dari nama file gambar
+  // sumbernya (lihat guessPatientIdFromFilename) daripada dibiarkan kosong.
+  segPatientNameInput.value =
+    data.patientId && data.patientId !== "?"
+      ? data.patientId
+      : guessPatientIdFromFilename(data.path) || guessPatientIdFromFilename(data.detailFile);
   segImagePathEl.textContent = data.path
     ? "Gambar: " + data.path + (data.detailFile ? ` (dimuat dari ${data.detailFile})` : "")
     : `Dimuat dari ${data.detailFile} (path gambar sumber tidak tercatat)`;
@@ -206,6 +215,16 @@ export async function doRunSegmentation() {
 
 export async function doSaveSegmentation() {
   if (!segState.segSelectedPath || segState.segDetections.length === 0) return;
+  await trySaveSegmentation(false);
+}
+
+// force=false: cek dulu ke server apakah hasil ini persis sama (jumlah sel
+// per kelas identik) dengan hasil TERAKHIR yang sudah tersimpan buat gambar
+// ini -- kalau iya, server belum nulis apa-apa & balikin needsConfirmation,
+// baru di sini ditanya ke user mau tetap disimpan sebagai duplikat atau
+// tidak (force=true buat beneran nulis). Ini nyegah folder numpuk banyak
+// file JSON isinya sama persis tanpa disadari user.
+async function trySaveSegmentation(force) {
   btnSaveSegmentation.disabled = true;
   btnSaveSegmentation.textContent = "Menyimpan...";
 
@@ -216,6 +235,7 @@ export async function doSaveSegmentation() {
       path: segState.segSelectedPath,
       patientId: segPatientNameInput.value.trim(),
       detections: segState.segDetections,
+      force,
     }),
   });
   const data = await res.json();
@@ -226,7 +246,19 @@ export async function doSaveSegmentation() {
     showToast(data.message || "Gagal menyimpan hasil.");
     return;
   }
+
+  if (data.needsConfirmation) {
+    const lanjut = await showConfirmModal(
+      `Hasil ini sama persis (jumlah sel per kelas identik) dengan hasil tersimpan ` +
+      `terakhir untuk gambar ini (${data.lastDetailFile}, ${data.lastTimestamp}).\n\n` +
+      `Simpan lagi sebagai duplikat?`
+    );
+    if (lanjut) await trySaveSegmentation(true);
+    return;
+  }
+
+  const dupNote = data.isDuplicate ? " (ditandai duplikat)" : "";
   showToast(
-    `Tersimpan (${data.totalCells} sel) -- lihat segmentation_log.csv di folder gambar sumber.`
+    `Tersimpan (${data.totalCells} sel)${dupNote} -- lihat segmentation_log.csv di folder gambar sumber.`
   );
 }

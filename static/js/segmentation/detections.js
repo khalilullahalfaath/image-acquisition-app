@@ -1,10 +1,10 @@
 import {
   segResultBody, segSourceBody, segZoomLabel, segDetectionsBody,
-  classSummaryBody, btnSegAddCell, btnSaveSegmentation,
+  classSummaryBody, classChartBody, segTotalCellCount, btnSegAddCell, btnSaveSegmentation,
   segSelectAllCells, segBulkClassSelect, segTabDetections, segBulkActionsBar,
 } from "../dom.js";
 import { segState, SEG_LOW_CONFIDENCE_THRESHOLD } from "./state.js";
-import { currentClassIndex } from "./utils.js";
+import { currentClassIndex, polygonCentroid } from "./utils.js";
 import { switchSegImageTab, switchSegListTab } from "./tabs.js";
 import { showToast } from "../modal.js";
 
@@ -189,12 +189,142 @@ export async function loadClassLegend() {
 
 // counts === null -> tampilan awal (belum ada hasil, semua "-")
 export function renderClassSummary(counts) {
+  if (!counts) segState.segHighlightedClassIndex = null; // reset kalau panel di-clear (belum ada hasil)
+  const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   classSummaryBody.innerHTML = segState.segClassLabels
     .map((c) => {
       const count = counts ? counts[c.label] ?? 0 : null;
-      return `<div class="summary-row"><span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span><span>${count === null ? "&ndash;" : count}</span></div>`;
+      const pct = counts && total > 0 ? (count / total) * 100 : 0;
+      const pctText = counts ? pct.toFixed(1) + "%" : "";
+      // Baris cuma bisa diklik kalau sudah ada hasil (counts != null) -- klik
+      // toggle highlight kelas itu di overlay gambar (lihat toggleClassHighlight).
+      const clickable = counts ? " seg-class-clickable" : "";
+      const active = counts && segState.segHighlightedClassIndex === c.index ? " seg-class-row-active" : "";
+      return `
+        <div class="summary-row seg-class-summary-row${clickable}${active}" data-class-index="${c.index}">
+          <span><span class="seg-color-dot" style="background:${c.color}"></span>${c.label}</span>
+          <span class="seg-class-summary-stats">
+            <span>${count === null ? "&ndash;" : count}</span>
+            ${counts ? `<span class="seg-class-pct">(${pctText})</span>` : ""}
+          </span>
+        </div>
+      `;
     })
     .join("");
+
+  if (counts) {
+    classSummaryBody.querySelectorAll(".seg-class-clickable").forEach((el) => {
+      el.addEventListener("click", () => toggleClassHighlight(parseInt(el.dataset.classIndex, 10)));
+    });
+  }
+  renderClassChart(counts);
+}
+
+// Pembulatan "nice" buat jarak antar gridline sumbu Y (0/1/2/5x10^n) --
+// pola umum di library chart, biar angka di sumbu gampang dibaca (bukan
+// pecahan aneh kayak 0, 3.33, 6.67).
+function niceTickStep(maxValue, targetTicks = 5) {
+  if (maxValue <= 0) return 1;
+  const raw = maxValue / targetTicks;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / magnitude;
+  let step;
+  if (norm < 1.5) step = 1;
+  else if (norm < 3) step = 2;
+  else if (norm < 7) step = 5;
+  else step = 10;
+  return step * magnitude;
+}
+
+// Grafik batang vertikal (SVG, tanpa library eksternal) buat ringkasan
+// klasifikasi per kelas -- pelengkap tampilan Tabel, biar sekali lihat
+// langsung kebaca kelas mana yang dominan.
+export function renderClassChart(counts) {
+  if (!counts) {
+    classChartBody.innerHTML =
+      '<span class="placeholder-text">Belum ada hasil untuk ditampilkan sebagai grafik.</span>';
+    return;
+  }
+
+  const chartW = 820;
+  const chartH = 340;
+  const marginLeft = 34;
+  const marginRight = 10;
+  const marginTop = 20;
+  const marginBottom = 96;
+  const plotW = chartW - marginLeft - marginRight;
+  const plotH = chartH - marginTop - marginBottom;
+
+  const n = segState.segClassLabels.length;
+  const maxCount = Math.max(1, ...segState.segClassLabels.map((c) => counts[c.label] ?? 0));
+  const tickStep = niceTickStep(maxCount);
+  const niceMax = Math.max(tickStep, Math.ceil(maxCount / tickStep) * tickStep);
+  const ticks = [];
+  for (let t = 0; t <= niceMax; t += tickStep) ticks.push(t);
+
+  const gridlines = ticks
+    .map((t) => {
+      const y = marginTop + plotH - (t / niceMax) * plotH;
+      return `
+        <line x1="${marginLeft}" y1="${y}" x2="${marginLeft + plotW}" y2="${y}" stroke="var(--slate-200)" stroke-width="1" />
+        <text x="${marginLeft - 6}" y="${y}" text-anchor="end" dominant-baseline="middle" font-size="11" fill="var(--slate-500)">${t}</text>
+      `;
+    })
+    .join("");
+
+  const barGap = 10;
+  const barW = (plotW - barGap * (n - 1)) / n;
+  const bars = segState.segClassLabels
+    .map((c, i) => {
+      const count = counts[c.label] ?? 0;
+      const barH = (count / niceMax) * plotH;
+      const x = marginLeft + i * (barW + barGap);
+      const y = marginTop + plotH - barH;
+      const labelX = x + barW / 2;
+      const dimmed =
+        segState.segHighlightedClassIndex !== null && segState.segHighlightedClassIndex !== c.index ? ' opacity="0.35"' : "";
+      const active = segState.segHighlightedClassIndex === c.index ? ' class="seg-class-bar-active"' : "";
+      return `
+        <g class="seg-class-chart-bar-group seg-class-clickable" data-class-index="${c.index}">
+          <rect x="${x}" y="${y}" width="${barW}" height="${Math.max(barH, 0)}" fill="${c.color}" rx="3"${dimmed}${active} />
+          <rect x="${x}" y="${marginTop}" width="${barW}" height="${plotH}" fill="transparent" />
+          ${count > 0 ? `<text x="${labelX}" y="${y - 4}" text-anchor="middle" font-size="11" font-weight="600" fill="var(--slate-800)">${count}</text>` : ""}
+          <text x="${labelX}" y="${marginTop + plotH + 14}" text-anchor="end" font-size="10" fill="var(--slate-500)" transform="rotate(-40 ${labelX} ${marginTop + plotH + 14})">${c.label}</text>
+        </g>
+      `;
+    })
+    .join("");
+
+  const axisLine = `<line x1="${marginLeft}" y1="${marginTop + plotH}" x2="${marginLeft + plotW}" y2="${marginTop + plotH}" stroke="var(--slate-400)" stroke-width="1.5" />`;
+
+  classChartBody.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="seg-class-chart-svg">${gridlines}${bars}${axisLine}</svg>`;
+
+  classChartBody.querySelectorAll(".seg-class-clickable").forEach((el) => {
+    el.addEventListener("click", () => toggleClassHighlight(parseInt(el.dataset.classIndex, 10)));
+  });
+}
+
+// Klik baris/bar kelas di ringkasan -> highlight (dim yang lain) sel kelas
+// itu di overlay Hasil Segmentasi. Klik lagi kelas yang sama -> matikan lagi.
+export function toggleClassHighlight(classIndex) {
+  segState.segHighlightedClassIndex = segState.segHighlightedClassIndex === classIndex ? null : classIndex;
+  updateClassSummaryFromDetections(); // render ulang tabel + grafik dgn state highlight terbaru
+  applySegClassHighlightToOverlay();
+}
+
+export function applySegClassHighlightToOverlay() {
+  const svg = segResultBody.querySelector("svg");
+  if (!svg) return;
+  svg.querySelectorAll("polygon[data-cell-id]").forEach((p) => {
+    const det = segState.segDetections.find((d) => d.id === parseInt(p.dataset.cellId, 10));
+    const idx = det ? currentClassIndex(det) : null;
+    p.classList.toggle("seg-polygon-dimmed", segState.segHighlightedClassIndex !== null && idx !== segState.segHighlightedClassIndex);
+  });
+  svg.querySelectorAll("text.seg-cell-number-label").forEach((t) => {
+    const det = segState.segDetections.find((d) => d.id === parseInt(t.dataset.cellId, 10));
+    const idx = det ? currentClassIndex(det) : null;
+    t.classList.toggle("seg-label-dimmed", segState.segHighlightedClassIndex !== null && idx !== segState.segHighlightedClassIndex);
+  });
 }
 
 export function updateClassSummaryFromDetections() {
@@ -209,27 +339,45 @@ export function updateClassSummaryFromDetections() {
 
 export function renderSegmentationOverlay() {
   const colorFor = (idx) => (segState.segClassLabels[idx] ? segState.segClassLabels[idx].color : "#64748b");
-  const polygons = segState.segDetections
-    .map((d) => {
-      const idx = currentClassIndex(d);
-      const pts = d.mask.map((p) => p.join(",")).join(" ");
-      // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
-      // yang perlu diprioritaskan dicek manual.
-      const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
-      const activeClass = d.id === segState.segActiveCellId ? ' class="seg-polygon-active"' : "";
-      return `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
-    })
-    .join("");
+  // Ukuran font label nomor diskalakan relatif ke dimensi gambar (bukan
+  // ukuran layar) karena SVG viewBox pakai satuan pixel gambar asli --
+  // biar tetap terbaca proporsional baik di gambar kecil maupun besar.
+  const numberFontSize = Math.max(14, Math.round(Math.min(segState.segImgW, segState.segImgH) * 0.018));
+  let polygons = "";
+  let labels = "";
+  segState.segDetections.forEach((d, i) => {
+    const idx = currentClassIndex(d);
+    const pts = d.mask.map((p) => p.join(",")).join(" ");
+    // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
+    // yang perlu diprioritaskan dicek manual.
+    const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
+    const activeClass = d.id === segState.segActiveCellId ? ' class="seg-polygon-active"' : "";
+    polygons += `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
+    // Nomor label ini match sama "Sel #${i+1}" di daftar (renderDetectionsList)
+    // supaya user gampang korelasikan mask di gambar dengan baris di daftar.
+    const [cx, cy] = polygonCentroid(d.mask);
+    labels += `<text class="seg-cell-number-label" data-cell-id="${d.id}" x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="${numberFontSize}">${i + 1}</text>`;
+  });
   segResultBody.innerHTML = `
     <div class="seg-overlay-wrap">
       <img src="${segState.segCurrentImageDataUrl}" alt="hasil segmentasi" />
-      <svg viewBox="0 0 ${segState.segImgW} ${segState.segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}</svg>
+      <svg viewBox="0 0 ${segState.segImgW} ${segState.segImgH}" preserveAspectRatio="xMidYMid meet">${polygons}${labels}</svg>
     </div>
   `;
   applySegZoomTransform();
+  applySegClassHighlightToOverlay();
+}
+
+// Dipanggil tiap kali segState.segDetections berubah -- biar jumlah sel di
+// samping tombol "Hasil Segmentasi" selalu konsisten sama daftar sel &
+// overlay.
+export function updateSegTotalCellCount() {
+  segTotalCellCount.textContent =
+    segState.segDetections.length > 0 ? `Jumlah sel terdeteksi: ${segState.segDetections.length} sel` : "";
 }
 
 export function renderDetectionsList() {
+  updateSegTotalCellCount();
   const detectionsTabActive = segTabDetections.classList.contains("seg-image-tab-active");
   segBulkActionsBar.classList.toggle("view-hidden", segState.segDetections.length === 0 || !detectionsTabActive);
   if (segState.segDetections.length === 0) {

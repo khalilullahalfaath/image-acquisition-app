@@ -48,3 +48,12 @@ RBC_CLASS_COLORS = [
 # ditulis di folder yang sama dengan gambar sumbernya -- polanya sengaja
 # dibuat mirip capture_log.csv biar gampang dianalisis bareng.
 SEGMENTATION_LOG_FILENAME = "segmentation_log.csv"
+
+# is_duplicate/duplicate_of: ditambahkan belakangan (lihat storage._ensure_log_columns)
+# buat nandain kalau suatu hasil disimpan persis sama (jumlah sel per kelas +
+# total identik) dengan hasil TERAKHIR yang sudah tersimpan buat gambar yang
+# sama -- biar folder nggak numpuk file JSON duplikat tanpa keterangan.
+SEGMENTATION_LOG_FIELDNAMES = (
+    ["timestamp", "patient_id", "source_image", "detail_file", "total_cells", "is_duplicate", "duplicate_of"]
+    + RBC_CLASS_LABELS
+)

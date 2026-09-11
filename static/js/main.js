@@ -7,6 +7,7 @@ import {
   tabCapture, tabSegmentation,
   btnSegSelectImage, btnLoadSegmentation, btnRunSegmentation, btnSaveSegmentation,
   btnSendToSegmentation, segTabSource, segTabResult, segTabDetections, segTabFolderResults,
+  segClassTabTable, segClassTabChart,
   btnSegAddCell, btnSegZoomIn, btnSegZoomOut, btnSegZoomReset, segSourceBody, segResultBody,
   btnSegPatientSummary, btnSegBatchRun, btnSegListResults, btnSegExportReport,
   segResultsFilter, segSelectAllCells, btnSegBulkApply, btnSegSaveModelConfig,
@@ -21,7 +22,7 @@ import {
   doCapture, doSelectFolder, doSave, loadFolderSummary, updateSaveButtonState,
   sendCaptureToSegmentation,
 } from "./capture.js";
-import { switchSegImageTab, switchSegListTab } from "./segmentation/tabs.js";
+import { switchSegImageTab, switchSegListTab, switchSegClassTab } from "./segmentation/tabs.js";
 import {
   toggleSegAddMode, setSegZoom, resetSegZoom, handleSegWheelZoom, segMouseDown, segMouseMove,
   segMouseUp, loadClassLegend, toggleSegSelectAll, doSegBulkApply,
@@ -34,7 +35,8 @@ import {
   applySegResultsFilter,
 } from "./segmentation/results-list.js";
 import { loadSegModelStatus, doSaveSegModelConfig } from "./segmentation/model-config.js";
-import "./segmentation/keyboard.js"; // cuma efek samping: pasang window keydown listener
+import "./segmentation/keyboard.js"; // cuma efek samping: pasang window keydown listener (tab Segmentasi)
+import "./keyboard.js"; // cuma efek samping: pasang window keydown listener (tab Capture)
 
 tabCapture.addEventListener("click", () => switchTab("capture"));
 tabSegmentation.addEventListener("click", () => switchTab("segmentation"));
@@ -45,6 +47,8 @@ btnSaveSegmentation.addEventListener("click", doSaveSegmentation);
 btnSendToSegmentation.addEventListener("click", sendCaptureToSegmentation);
 segTabSource.addEventListener("click", () => switchSegImageTab("source"));
 segTabResult.addEventListener("click", () => switchSegImageTab("result"));
+segClassTabTable.addEventListener("click", () => switchSegClassTab("table"));
+segClassTabChart.addEventListener("click", () => switchSegClassTab("chart"));
 segTabDetections.addEventListener("click", () => switchSegListTab("detections"));
 segTabFolderResults.addEventListener("click", doLoadSegResultsListButton);
 
