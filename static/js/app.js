@@ -44,6 +44,7 @@ const segBulkActionsBar = document.getElementById("segBulkActionsBar");
 const segSelectAllCells = document.getElementById("segSelectAllCells");
 const segBulkClassSelect = document.getElementById("segBulkClassSelect");
 const btnSegBulkApply = document.getElementById("btnSegBulkApply");
+const btnSegMarkRestCorrect = document.getElementById("btnSegMarkRestCorrect");
 const segModelStatusText = document.getElementById("segModelStatusText");
 const segModelPathInput = document.getElementById("segModelPathInput");
 const segLowConfidenceThresholdInput = document.getElementById("segLowConfidenceThresholdInput");
@@ -1117,11 +1118,20 @@ function renderSegmentationOverlay() {
   applySegClassHighlightToOverlay();
 }
 
-// Dipanggil tiap kali segDetections berubah -- biar jumlah sel di samping
-// tombol "Hasil Segmentasi" selalu konsisten sama daftar sel & overlay.
+// Dipanggil tiap kali segDetections berubah (termasuk tiap klik tombol
+// verdict dokter, lewat renderDetectionsList) -- biar jumlah sel + statistik
+// review dokter di samping tombol "Hasil Segmentasi" selalu konsisten sama
+// daftar sel & overlay, update live tanpa perlu Simpan/reload dulu.
 function updateSegTotalCellCount() {
-  segTotalCellCount.textContent =
-    segDetections.length > 0 ? `Jumlah sel terdeteksi: ${segDetections.length} sel` : "";
+  if (segDetections.length === 0) {
+    segTotalCellCount.textContent = "";
+    return;
+  }
+  const correct = segDetections.filter((d) => d.doctorVerdict === "correct").length;
+  const incorrect = segDetections.filter((d) => d.doctorVerdict === "incorrect").length;
+  const reviewed = correct + incorrect;
+  const verdictText = reviewed > 0 ? `, direview ${reviewed}/${segDetections.length} (✓${correct} ✗${incorrect})` : "";
+  segTotalCellCount.textContent = `Jumlah sel terdeteksi: ${segDetections.length} sel${verdictText}`;
 }
 
 function renderDetectionsList() {
@@ -1375,10 +1385,13 @@ async function doLoadSegPatientSummary() {
     return;
   }
   segPatientSummaryBody.innerHTML = data.patients
-    .map(
-      (p) =>
-        `<div class="summary-row"><span>${p.patientId}</span><span>${p.totalImages} gambar, ${p.totalCells} sel</span></div>`
-    )
+    .map((p) => {
+      const verdictText =
+        p.totalReviewed > 0
+          ? `, direview ${p.totalReviewed} (✓${p.totalCorrect} ✗${p.totalIncorrect})`
+          : "";
+      return `<div class="summary-row"><span>${p.patientId}</span><span>${p.totalImages} gambar, ${p.totalCells} sel${verdictText}</span></div>`;
+    })
     .join("");
 }
 
@@ -1599,6 +1612,25 @@ function doSegBulkApply() {
   showToast(`${count} sel diubah ke kelas "${newLabel}". Jangan lupa klik "Simpan Hasil".`);
 }
 
+// Alur "review by exception": dokter cuma perlu tandai sel yang SALAH (klik
+// &cross; satu-satu), lalu sekali klik ini buat menandai eksplisit semua sel
+// yang belum disentuh (doctorVerdict masih null) sebagai Benar. Sengaja
+// TIDAK ada asumsi diam-diam "belum direview = benar" di tempat lain manapun
+// (lihat updateSegTotalCellCount/Ringkasan per Pasien) -- ini satu-satunya
+// jalan buat sel jadi "benar", dan itu pun lewat aksi eksplisit dokter,
+// bukan default otomatis, biar datanya tetap bisa dipercaya kalau nanti
+// dipakai buat evaluasi model.
+function doSegMarkRestCorrect() {
+  const unreviewed = segDetections.filter((d) => d.doctorVerdict === null || d.doctorVerdict === undefined);
+  if (unreviewed.length === 0) {
+    showToast("Semua sel sudah direview (Benar/Salah).");
+    return;
+  }
+  unreviewed.forEach((d) => (d.doctorVerdict = "correct"));
+  renderDetectionsList();
+  showToast(`${unreviewed.length} sel yang belum direview ditandai Benar. Jangan lupa klik "Simpan Hasil".`);
+}
+
 // -----------------------------------------------------------------------
 // Status & konfigurasi model segmentasi (placeholder -- lihat catatan di
 // app.py, belum ada inference model beneran yang terpasang)
@@ -1765,6 +1797,7 @@ btnSegExportReport.addEventListener("click", doExportSegReport);
 segResultsFilter.addEventListener("input", applySegResultsFilter);
 segSelectAllCells.addEventListener("change", toggleSegSelectAll);
 btnSegBulkApply.addEventListener("click", doSegBulkApply);
+btnSegMarkRestCorrect.addEventListener("click", doSegMarkRestCorrect);
 btnSegSaveModelConfig.addEventListener("click", doSaveSegModelConfig);
 
 btnConnectCamera.addEventListener("click", connectCamera);

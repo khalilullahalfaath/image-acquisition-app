@@ -1448,6 +1448,9 @@ def api_segmentation_patient_summary():
                 "patientId": pid,
                 "totalImages": 0,
                 "totalCells": 0,
+                "totalReviewed": 0,
+                "totalCorrect": 0,
+                "totalIncorrect": 0,
                 "classCounts": {label: 0 for label in RBC_CLASS_LABELS},
             }
         patients[pid]["totalImages"] += 1
@@ -1455,6 +1458,15 @@ def api_segmentation_patient_summary():
             patients[pid]["totalCells"] += int(row.get("total_cells") or 0)
         except ValueError:
             pass
+        for key, field in (
+            ("totalReviewed", "doctor_reviewed_count"),
+            ("totalCorrect", "doctor_correct_count"),
+            ("totalIncorrect", "doctor_incorrect_count"),
+        ):
+            try:
+                patients[pid][key] += int(row.get(field) or 0)
+            except (ValueError, TypeError):
+                pass
         for label in RBC_CLASS_LABELS:
             try:
                 patients[pid]["classCounts"][label] += int(row.get(label) or 0)
