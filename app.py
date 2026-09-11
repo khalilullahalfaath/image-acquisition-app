@@ -1635,14 +1635,197 @@ def api_segmentation_export_report():
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_patient = safe_slug(patient_id_filter) if patient_id_filter else "semua-pasien"
+    # Timestamp cuma presisi per detik -- dua export cepat berturut-turut bisa
+    # jatuh di detik yang sama dan nimpa file satu sama lain tanpa peringatan
+    # kalau nama filenya sama persis (bug yang sama ditemukan & diperbaiki di
+    # api_segmentation_export_coco). Tambah suffix numerik biar tetap unik.
+    dedup_suffix = 0
     filename = f"laporan_segmentasi_{safe_patient}_{timestamp}.xlsx"
     export_path = os.path.join(folder, filename)
+    while os.path.exists(export_path):
+        dedup_suffix += 1
+        filename = f"laporan_segmentasi_{safe_patient}_{timestamp}-{dedup_suffix}.xlsx"
+        export_path = os.path.join(folder, filename)
     try:
         wb.save(export_path)
     except OSError as e:
         return jsonify({"ok": False, "message": f"Gagal menyimpan file laporan: {e}"}), 500
 
     return jsonify({"ok": True, "path": export_path, "filename": filename})
+
+
+def _polygon_area(points):
+    """Luas polygon sederhana (shoelace formula) -- dipakai buat field "area"
+    di annotation COCO, nggak butuh dependency tambahan apapun."""
+    n = len(points)
+    if n < 3:
+        return 0.0
+    area = 0.0
+    for i in range(n):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % n]
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0
+
+
+@app.route("/api/segmentation/export-coco", methods=["POST"])
+def api_segmentation_export_coco():
+    """Export hasil segmentasi satu folder ke satu file annotations.json
+    format COCO instance segmentation (images/annotations/categories) --
+    siap dipakai buat training Mask R-CNN/Detectron2 nanti begitu model
+    aslinya mulai dikerjakan. Beda dari export-report (Excel, buat dibaca
+    manusia), ini format standar yang langsung bisa dimuat library training.
+
+    Kelas yang dipakai per sel selalu kelas EFEKTIF-nya (correctedClassLabel
+    kalau ada koreksi, kalau tidak classLabel asli model) -- sama seperti
+    logic class_counts di api_segmentation_save.
+
+    onlyReviewed=True: cuma sel dengan doctorVerdict terisi yang masuk. Sel
+    "incorrect" TANPA correctedClassIndex (dokter cuma tandai salah, belum
+    sempat ganti kelasnya) sengaja DILEWATI biar nggak nyemarin dataset
+    dengan label yang sudah diketahui keliru -- bukan disertakan pakai label
+    asli yang salah itu."""
+    data = request.json or {}
+    folder = (data.get("folder") or "").strip()
+    patient_id_filter = (data.get("patientId") or "").strip()
+    only_reviewed = bool(data.get("onlyReviewed"))
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"ok": False, "message": "Folder tidak valid."}), 400
+
+    rows = _latest_segmentation_rows(folder)
+    if patient_id_filter:
+        rows = [r for r in rows if (r.get("patient_id") or "") == patient_id_filter]
+    if not rows:
+        return jsonify({"ok": False, "message": "Tidak ada hasil yang cocok untuk diekspor."}), 400
+
+    category_by_label = {label: i + 1 for i, label in enumerate(RBC_CLASS_LABELS)}
+    categories = [{"id": i + 1, "name": label} for i, label in enumerate(RBC_CLASS_LABELS)]
+
+    images = []
+    annotations = []
+    skipped_images = 0
+    skipped_cells = 0
+    next_image_id = 1
+    next_ann_id = 1
+
+    for row in sorted(rows, key=lambda r: r.get("timestamp") or ""):
+        detail_file = row.get("detail_file")
+        if not detail_file:
+            continue
+        detail_path = os.path.join(folder, detail_file)
+        try:
+            with open(detail_path, "r", encoding="utf-8") as f:
+                detail = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            skipped_images += 1
+            continue
+
+        source_image = detail.get("sourceImage")
+        frame = cv2.imread(source_image) if source_image else None
+        if frame is None:
+            skipped_images += 1
+            continue
+        height, width = frame.shape[:2]
+
+        image_id = next_image_id
+        next_image_id += 1
+        images.append({
+            "id": image_id,
+            "file_name": os.path.basename(source_image),
+            "width": width,
+            "height": height,
+        })
+
+        for d in (detail.get("detections") or []):
+            corrected_idx = d.get("correctedClassIndex")
+            has_correction = corrected_idx is not None and corrected_idx != d.get("classIndex")
+            label = d.get("correctedClassLabel") if has_correction else d.get("classLabel")
+            verdict = d.get("doctorVerdict")
+
+            if only_reviewed:
+                if verdict not in ("correct", "incorrect"):
+                    skipped_cells += 1
+                    continue
+                if verdict == "incorrect" and not has_correction:
+                    skipped_cells += 1
+                    continue
+
+            category_id = category_by_label.get(label)
+            mask = d.get("mask") or []
+            if category_id is None or len(mask) < 3:
+                skipped_cells += 1
+                continue
+
+            bbox = d.get("bbox")
+            if not bbox or len(bbox) != 4:
+                xs = [p[0] for p in mask]
+                ys = [p[1] for p in mask]
+                bbox = [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+
+            annotations.append({
+                "id": next_ann_id,
+                "image_id": image_id,
+                "category_id": category_id,
+                "segmentation": [[coord for point in mask for coord in point]],
+                "area": _polygon_area(mask),
+                "bbox": bbox,
+                "iscrowd": 0,
+            })
+            next_ann_id += 1
+
+    if not images:
+        return jsonify({"ok": False, "message": "Tidak ada gambar yang berhasil dibaca untuk diekspor."}), 400
+
+    model_path = (_load_model_config().get("modelPath") or "").strip()
+    coco = {
+        "info": {
+            "description": (
+                "Dataset diekspor dari Thalassemia Capture App. "
+                + (
+                    f'Dihasilkan model mock (belum ada inference asli; modelPath tersimpan: "{model_path}").'
+                    if not model_path
+                    else f'modelPath tersimpan: "{model_path}" -- cek apakah inference asli sudah terpasang.'
+                )
+            ),
+            "date_created": datetime.now().isoformat(),
+        },
+        "images": images,
+        "annotations": annotations,
+        "categories": categories,
+    }
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_patient = safe_slug(patient_id_filter) if patient_id_filter else "semua-pasien"
+    # Timestamp cuma presisi per detik -- dua export cepat berturut-turut
+    # (mis. toggle checkbox lalu export lagi) bisa jatuh di detik yang sama
+    # dan nimpa file satu sama lain tanpa peringatan kalau nama filenya sama
+    # persis. Tambah suffix numerik biar tetap unik (pola sama seperti
+    # detail_filename di api_segmentation_save).
+    dedup_suffix = 0
+    filename = f"dataset_coco_{safe_patient}_{timestamp}.json"
+    export_path = os.path.join(folder, filename)
+    while os.path.exists(export_path):
+        dedup_suffix += 1
+        filename = f"dataset_coco_{safe_patient}_{timestamp}-{dedup_suffix}.json"
+        export_path = os.path.join(folder, filename)
+    try:
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump(coco, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        return jsonify({"ok": False, "message": f"Gagal menyimpan dataset: {e}"}), 500
+
+    skip_note = ""
+    if skipped_images or skipped_cells:
+        skip_note = (
+            f" ({skipped_images} gambar dilewati (tidak terbaca), "
+            f"{skipped_cells} sel dilewati (belum direview/koreksi tidak lengkap))"
+        )
+    return jsonify({
+        "ok": True,
+        "path": export_path,
+        "filename": filename,
+        "message": f"Dataset COCO tersimpan: {len(images)} gambar, {len(annotations)} sel{skip_note}.",
+    })
 
 
 # ---------------------------------------------------------------------------

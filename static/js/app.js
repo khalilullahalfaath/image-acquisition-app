@@ -40,6 +40,8 @@ const btnSegListResults = document.getElementById("btnSegListResults");
 const segResultsListBody = document.getElementById("segResultsListBody");
 const segResultsFilter = document.getElementById("segResultsFilter");
 const btnSegExportReport = document.getElementById("btnSegExportReport");
+const segCocoOnlyReviewedCheckbox = document.getElementById("segCocoOnlyReviewedCheckbox");
+const btnSegExportCoco = document.getElementById("btnSegExportCoco");
 const segBulkActionsBar = document.getElementById("segBulkActionsBar");
 const segSelectAllCells = document.getElementById("segSelectAllCells");
 const segBulkClassSelect = document.getElementById("segBulkClassSelect");
@@ -1424,6 +1426,34 @@ async function doExportSegReport() {
   showToast("Laporan tersimpan: " + data.filename);
 }
 
+// Export hasil segmentasi folder aktif ke format COCO (annotations.json) --
+// siap dipakai training Mask R-CNN/Detectron2, beda dari Export Laporan
+// (Excel) yang buat dibaca manusia. Checkbox "Hanya yang sudah direview"
+// menentukan apakah sel yang belum ditandai Benar/Salah ikut atau tidak
+// (lihat penjelasan lengkap di api_segmentation_export_coco).
+async function doExportSegDatasetCoco() {
+  if (!segActiveFolder) {
+    showToast("Pilih/muat gambar dulu (atau jalankan Proses Batch) supaya tahu folder yang mau diekspor.");
+    return;
+  }
+  btnSegExportCoco.disabled = true;
+  btnSegExportCoco.textContent = "Mengekspor...";
+  const res = await fetch("/api/segmentation/export-coco", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      folder: segActiveFolder,
+      patientId: segPatientNameInput.value.trim(),
+      onlyReviewed: segCocoOnlyReviewedCheckbox.checked,
+    }),
+  });
+  const data = await res.json();
+  btnSegExportCoco.disabled = false;
+  btnSegExportCoco.textContent = "Export Dataset (COCO)";
+
+  showToast(data.message || (data.ok ? "Dataset tersimpan." : "Gagal mengekspor dataset."));
+}
+
 // Render daftar hasil yang bisa diklik -- setiap baris, kalau diklik,
 // langsung buka hasil itu buat direview/dikoreksi (doLoadSegmentationResultByPath),
 // TANPA dialog file. Dipakai baik dipanggil manual (tombol "Muat Daftar")
@@ -1794,6 +1824,7 @@ btnSegPatientSummary.addEventListener("click", doLoadSegPatientSummary);
 btnSegBatchRun.addEventListener("click", doSegBatchRun);
 btnSegListResults.addEventListener("click", doLoadSegResultsListButton);
 btnSegExportReport.addEventListener("click", doExportSegReport);
+btnSegExportCoco.addEventListener("click", doExportSegDatasetCoco);
 segResultsFilter.addEventListener("input", applySegResultsFilter);
 segSelectAllCells.addEventListener("change", toggleSegSelectAll);
 btnSegBulkApply.addEventListener("click", doSegBulkApply);
