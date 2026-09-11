@@ -385,6 +385,19 @@
               >
                 Export Laporan (Excel)
               </button>
+              <label
+                class="seg-bulk-select-all"
+                title="Kalau dicentang, sel yang belum direview dokter (dan sel 'Salah' tanpa koreksi kelas) tidak ikut diekspor"
+              >
+                <input type="checkbox" id="segCocoOnlyReviewedCheckbox" checked /> Hanya yang sudah direview
+              </label>
+              <button
+                id="btnSegExportCoco"
+                class="btn btn-outline btn-sm"
+                title="Export hasil segmentasi folder ini ke format COCO (annotations.json), siap dipakai training Mask R-CNN/Detectron2"
+              >
+                Export Dataset (COCO)
+              </button>
             </div>
           </div>
           <div id="segPatientSummaryBody" class="summary-body">
