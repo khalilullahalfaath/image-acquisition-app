@@ -91,8 +91,13 @@ SEGMENTATION_LOG_FILENAME = "segmentation_log.csv"
 # buat nandain kalau suatu hasil disimpan persis sama (jumlah sel per kelas +
 # total identik) dengan hasil TERAKHIR yang sudah tersimpan buat gambar yang
 # sama -- biar folder nggak numpuk file JSON duplikat tanpa keterangan.
+#
+# doctor_reviewed_count/doctor_correct_count/doctor_incorrect_count: agregasi
+# penilaian dokter per sel (lihat doctorVerdict di detections) -- diisi 0 buat
+# hasil batch (mock otomatis, tidak pernah direview satu-satu).
 SEGMENTATION_LOG_FIELDNAMES = (
     ["timestamp", "patient_id", "source_image", "detail_file", "total_cells", "is_duplicate", "duplicate_of"]
+    + ["doctor_reviewed_count", "doctor_correct_count", "doctor_incorrect_count"]
     + RBC_CLASS_LABELS
 )
 
@@ -1107,6 +1112,13 @@ def api_segmentation_save():
         if label in class_counts:
             class_counts[label] += 1
 
+    # Agregasi penilaian dokter per sel (doctorVerdict: "correct"/"incorrect"/
+    # null kalau belum direview) -- dipakai buat kolom ringkasan di
+    # segmentation_log.csv & laporan Excel (lihat api_segmentation_export_report).
+    doctor_correct_count = sum(1 for d in detections if d.get("doctorVerdict") == "correct")
+    doctor_incorrect_count = sum(1 for d in detections if d.get("doctorVerdict") == "incorrect")
+    doctor_reviewed_count = doctor_correct_count + doctor_incorrect_count
+
     with segmentation_log_lock:
         log_path = os.path.join(folder, SEGMENTATION_LOG_FILENAME)
         _ensure_log_columns(log_path, SEGMENTATION_LOG_FIELDNAMES)
@@ -1171,6 +1183,9 @@ def api_segmentation_save():
             "total_cells": len(detections),
             "is_duplicate": "1" if is_duplicate else "0",
             "duplicate_of": duplicate_of,
+            "doctor_reviewed_count": doctor_reviewed_count,
+            "doctor_correct_count": doctor_correct_count,
+            "doctor_incorrect_count": doctor_incorrect_count,
             **class_counts,
         }
         try:
@@ -1321,6 +1336,11 @@ def api_segmentation_batch_run():
                 "total_cells": len(detections),
                 "is_duplicate": "0",  # batch selalu jalankan segmentasi baru, nggak dicek duplikat
                 "duplicate_of": "",
+                # Hasil batch murni mock otomatis, belum pernah direview dokter
+                # satu-satu -- kolomnya tetap diisi 0 biar CSV konsisten.
+                "doctor_reviewed_count": 0,
+                "doctor_correct_count": 0,
+                "doctor_incorrect_count": 0,
                 **class_counts,
             }
             try:
@@ -1505,9 +1525,11 @@ def api_segmentation_export_report():
 
     wb = openpyxl.Workbook()
 
+    doctor_cols = ["Direview Dokter", "Benar (Dokter)", "Salah (Dokter)"]
+
     ws1 = wb.active
     ws1.title = "Ringkasan Pasien"
-    ws1.append(["ID Pasien", "Jumlah Gambar", "Total Sel"] + RBC_CLASS_LABELS)
+    ws1.append(["ID Pasien", "Jumlah Gambar", "Total Sel"] + doctor_cols + RBC_CLASS_LABELS)
     for cell in ws1[1]:
         cell.font = Font(bold=True)
 
@@ -1515,31 +1537,86 @@ def api_segmentation_export_report():
     for row in rows:
         pid = row.get("patient_id") or "?"
         if pid not in patients:
-            patients[pid] = {"images": 0, "totalCells": 0, "counts": {l: 0 for l in RBC_CLASS_LABELS}}
+            patients[pid] = {
+                "images": 0,
+                "totalCells": 0,
+                "reviewed": 0,
+                "correct": 0,
+                "incorrect": 0,
+                "counts": {l: 0 for l in RBC_CLASS_LABELS},
+            }
         patients[pid]["images"] += 1
         try:
             patients[pid]["totalCells"] += int(row.get("total_cells") or 0)
         except ValueError:
             pass
+        for key in ("reviewed", "correct", "incorrect"):
+            try:
+                patients[pid][key] += int(row.get(f"doctor_{key}_count") or 0)
+            except (ValueError, TypeError):
+                pass
         for label in RBC_CLASS_LABELS:
             try:
                 patients[pid]["counts"][label] += int(row.get(label) or 0)
             except (ValueError, TypeError):
                 pass
     for pid, agg in sorted(patients.items()):
-        ws1.append([pid, agg["images"], agg["totalCells"]] + [agg["counts"][l] for l in RBC_CLASS_LABELS])
+        ws1.append(
+            [pid, agg["images"], agg["totalCells"], agg["reviewed"], agg["correct"], agg["incorrect"]]
+            + [agg["counts"][l] for l in RBC_CLASS_LABELS]
+        )
 
     ws2 = wb.create_sheet("Detail per Gambar")
-    ws2.append(["Timestamp", "ID Pasien", "Gambar", "Total Sel"] + RBC_CLASS_LABELS)
+    ws2.append(["Timestamp", "ID Pasien", "Gambar", "Total Sel"] + doctor_cols + RBC_CLASS_LABELS)
     for cell in ws2[1]:
         cell.font = Font(bold=True)
     for row in sorted(rows, key=lambda r: r.get("timestamp") or ""):
         ws2.append(
             [row.get("timestamp"), row.get("patient_id"), row.get("source_image"), row.get("total_cells")]
+            + [row.get("doctor_reviewed_count"), row.get("doctor_correct_count"), row.get("doctor_incorrect_count")]
             + [row.get(l) for l in RBC_CLASS_LABELS]
         )
 
-    for ws in (ws1, ws2):
+    # Sheet ketiga: satu baris per SEL terdeteksi (bukan per gambar/pasien) --
+    # butuh baca ulang tiap file JSON detail (segmentation_log.csv cuma nyimpen
+    # ringkasan per gambar, bukan per sel). File yang hilang/rusak dilewati
+    # (baris itu aja) supaya satu file bermasalah nggak menggagalkan seluruh
+    # export.
+    ws3 = wb.create_sheet("Detail per Sel")
+    ws3.append([
+        "Timestamp", "ID Pasien", "Gambar", "No. Sel", "Kelas Model",
+        "Kelas Dikoreksi", "Confidence (%)", "Manual", "Verdict Dokter",
+    ])
+    for cell in ws3[1]:
+        cell.font = Font(bold=True)
+    for row in sorted(rows, key=lambda r: r.get("timestamp") or ""):
+        detail_file = row.get("detail_file")
+        if not detail_file:
+            continue
+        detail_path = os.path.join(folder, detail_file)
+        try:
+            with open(detail_path, "r", encoding="utf-8") as f:
+                detail = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        for i, d in enumerate(detail.get("detections") or []):
+            corrected_idx = d.get("correctedClassIndex")
+            has_correction = corrected_idx is not None and corrected_idx != d.get("classIndex")
+            verdict = {"correct": "Benar", "incorrect": "Salah"}.get(d.get("doctorVerdict"), "-")
+            confidence = d.get("confidence")
+            ws3.append([
+                row.get("timestamp"),
+                row.get("patient_id"),
+                row.get("source_image"),
+                i + 1,
+                d.get("classLabel"),
+                d.get("correctedClassLabel") if has_correction else "",
+                round(confidence * 100, 1) if isinstance(confidence, (int, float)) else confidence,
+                "Ya" if d.get("manual") else "Tidak",
+                verdict,
+            ])
+
+    for ws in (ws1, ws2, ws3):
         for col_cells in ws.columns:
             length = max((len(str(c.value)) if c.value is not None else 0) for c in col_cells)
             ws.column_dimensions[col_cells[0].column_letter].width = min(30, max(10, length + 2))
@@ -1572,15 +1649,31 @@ MODEL_CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), MODEL_CONFIG_FILENAME
 )
 
+# Ambang batas (persen) confidence sel yang dianggap "rendah" di UI (badge +
+# garis putus-putus di overlay) -- disimpan di file config yang sama dengan
+# modelPath biar bisa diatur dari panel "Status Model Segmentasi" tanpa perlu
+# ubah kode, bukan angka mutlak yang berlaku selamanya.
+DEFAULT_LOW_CONFIDENCE_THRESHOLD = 70
+
 
 def _load_model_config():
+    config = {"modelPath": "", "lowConfidenceThreshold": DEFAULT_LOW_CONFIDENCE_THRESHOLD}
     if os.path.isfile(MODEL_CONFIG_PATH):
         try:
             with open(MODEL_CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                config.update(loaded)
         except (OSError, json.JSONDecodeError):
             pass
-    return {"modelPath": ""}
+    try:
+        threshold = int(config.get("lowConfidenceThreshold"))
+        if not (1 <= threshold <= 100):
+            raise ValueError
+        config["lowConfidenceThreshold"] = threshold
+    except (TypeError, ValueError):
+        config["lowConfidenceThreshold"] = DEFAULT_LOW_CONFIDENCE_THRESHOLD
+    return config
 
 
 @app.route("/api/segmentation/model-status")
@@ -1600,6 +1693,7 @@ def api_segmentation_model_status():
         "usingMock": True,
         "modelPath": model_path,
         "modelFileFound": model_file_found,
+        "lowConfidenceThreshold": config["lowConfidenceThreshold"],
         "message": "Semua hasil segmentasi saat ini masih DUMMY/placeholder. " + detail,
     })
 
@@ -1609,11 +1703,20 @@ def api_segmentation_model_config():
     data = request.json or {}
     model_path = (data.get("modelPath") or "").strip()
     try:
+        threshold = int(data.get("lowConfidenceThreshold"))
+        if not (1 <= threshold <= 100):
+            raise ValueError
+    except (TypeError, ValueError):
+        threshold = DEFAULT_LOW_CONFIDENCE_THRESHOLD
+    try:
         with open(MODEL_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump({"modelPath": model_path}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {"modelPath": model_path, "lowConfidenceThreshold": threshold},
+                f, ensure_ascii=False, indent=2,
+            )
     except OSError as e:
         return jsonify({"ok": False, "message": f"Gagal menyimpan konfigurasi: {e}"}), 500
-    return jsonify({"ok": True, "modelPath": model_path})
+    return jsonify({"ok": True, "modelPath": model_path, "lowConfidenceThreshold": threshold})
 
 
 if __name__ == "__main__":
