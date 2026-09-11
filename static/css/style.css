@@ -8,6 +8,7 @@
   --slate-100: #f1f5f9;
   --slate-50: #f8fafc;
   --blue-600: #2563eb;
+  --blue-100: #dbeafe;
   --blue-50: #eff6ff;
   --blue-700: #1d4ed8;
   --green-600: #16a34a;
@@ -343,8 +344,15 @@ body {
   padding: 4px 12px;
 }
 
-.seg-detection-row { cursor: pointer; align-items: center; }
-.seg-detection-row.seg-row-active { background: var(--blue-50); border-radius: 6px; }
+.seg-detection-row { cursor: pointer; align-items: center; border-left: 3px solid transparent; }
+/* Sebelumnya pakai --blue-50 (#eff6ff), nyaris nggak kelihatan bedanya dari
+   latar putih -- diganti lebih pekat + border kiri biar jelas sel mana yang
+   lagi aktif/dipilih meski di layar redup. */
+.seg-detection-row.seg-row-active {
+  background: var(--blue-100);
+  border-left-color: var(--blue-600);
+  border-radius: 6px;
+}
 
 .seg-result-list-row { cursor: pointer; }
 .seg-result-list-row:hover { background: var(--slate-50); border-radius: 6px; }
@@ -376,10 +384,26 @@ body {
 }
 
 .seg-model-status-text { font-size: 12px; color: var(--slate-500); margin-bottom: 10px; }
-.seg-model-config-row { display: flex; gap: 8px; }
+.seg-model-config-row { display: flex; gap: 8px; align-items: center; }
 .seg-model-config-row input {
   flex: 1;
   padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--slate-300);
+  font-size: 12px;
+}
+.seg-threshold-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--slate-500);
+  white-space: nowrap;
+}
+.seg-threshold-field input {
+  flex: 0 0 auto;
+  width: 56px;
+  padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--slate-300);
   font-size: 12px;
@@ -446,6 +470,22 @@ body {
 }
 .seg-delete-btn:hover { background: #fee2e2; border-radius: 4px; }
 
+/* Penilaian dokter per sel (Benar/Salah) -- netral/outline sampai diklik,
+   lalu berubah warna sesuai verdict-nya biar kebaca sekilas dari daftar. */
+.seg-doctor-btn {
+  border: 1px solid var(--slate-300);
+  background: var(--white);
+  color: var(--slate-500);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 3px 6px;
+}
+.seg-doctor-btn-correct.active { background: var(--green-50); border-color: var(--green-600); color: var(--green-600); }
+.seg-doctor-btn-incorrect.active { background: #fee2e2; border-color: var(--red-500); color: var(--red-500); }
+
 .seg-detections-help {
   font-size: 11px;
   color: var(--slate-500);
@@ -460,6 +500,7 @@ body {
   align-items: center;
   margin-bottom: 12px;
 }
+.seg-tools-left { display: flex; align-items: center; gap: 16px; }
 .btn-toggle-active { background: var(--blue-600); border-color: var(--blue-600); color: var(--white); }
 
 .btn-icon-sm {
@@ -472,6 +513,7 @@ body {
   color: var(--slate-800);
   cursor: pointer;
 }
+.btn-icon-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 .seg-zoom-controls { display: flex; align-items: center; gap: 6px; }
 .seg-zoom-label { font-size: 12px; color: var(--slate-500); min-width: 38px; text-align: center; }
 

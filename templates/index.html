@@ -189,15 +189,41 @@
         <div id="segImagePath" class="folder-path"></div>
 
         <div class="seg-tools-row">
-          <button
-            type="button"
-            id="btnSegAddCell"
-            class="btn btn-outline"
-            disabled
-            title="Klik tombol ini, lalu klik posisi sel di gambar Hasil Segmentasi untuk menambah sel yang kelewat dideteksi"
-          >
-            + Tambah Sel Manual
-          </button>
+          <div class="seg-tools-left">
+            <button
+              type="button"
+              id="btnSegAddCell"
+              class="btn btn-outline"
+              disabled
+              title="Klik tombol ini, lalu klik posisi sel di gambar Hasil Segmentasi untuk menambah sel yang kelewat dideteksi"
+            >
+              + Tambah Sel Manual
+            </button>
+            <div class="seg-zoom-controls">
+              <button
+                type="button"
+                id="btnSegCellShrink"
+                class="btn-icon-sm"
+                disabled
+                title="Perkecil sel yang sedang dipilih (shortcut: -)"
+              >
+                &minus;
+              </button>
+              <span class="seg-zoom-label">Ukuran Sel</span>
+              <button
+                type="button"
+                id="btnSegCellGrow"
+                class="btn-icon-sm"
+                disabled
+                title="Perbesar sel yang sedang dipilih (shortcut: +)"
+              >
+                +
+              </button>
+            </div>
+            <label class="seg-bulk-select-all">
+              <input type="checkbox" id="segShowNumbersCheckbox" checked /> Tampilkan Nomor Sel
+            </label>
+          </div>
           <div class="seg-zoom-controls">
             <button
               type="button"
@@ -291,6 +317,14 @@
               <button type="button" id="btnSegBulkApply" class="btn-icon-sm">
                 Terapkan
               </button>
+              <button
+                type="button"
+                id="btnSegMarkRestCorrect"
+                class="btn-icon-sm"
+                title="Tandai semua sel yang BELUM direview (tanpa &check;/&cross;) sebagai Benar sekaligus -- cocok buat alur kerja: tandai &cross; sel yang salah dulu, sisanya tinggal sekali klik ini"
+              >
+                Tandai Sisanya Benar
+              </button>
             </div>
             <div id="segDetectionsBody" class="panel-body-list">
               <div class="summary-row">Belum ada hasil.</div>
@@ -372,6 +406,13 @@
                 id="segModelPathInput"
                 placeholder="Path checkpoint model (opsional, buat integrasi nanti)..."
               />
+              <label
+                class="seg-threshold-field"
+                title="Sel dengan confidence di bawah angka ini ditandai 'confidence rendah' (badge + garis putus-putus)"
+              >
+                Ambang confidence rendah (%)
+                <input type="number" id="segLowConfidenceThresholdInput" min="1" max="100" value="70" />
+              </label>
               <button id="btnSegSaveModelConfig" class="btn btn-outline btn-sm">
                 Simpan
               </button>

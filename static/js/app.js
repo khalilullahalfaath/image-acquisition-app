@@ -25,6 +25,9 @@ const classChartBody = document.getElementById("classChartBody");
 const segClassTabTable = document.getElementById("segClassTabTable");
 const segClassTabChart = document.getElementById("segClassTabChart");
 const btnSegAddCell = document.getElementById("btnSegAddCell");
+const btnSegCellShrink = document.getElementById("btnSegCellShrink");
+const btnSegCellGrow = document.getElementById("btnSegCellGrow");
+const segShowNumbersCheckbox = document.getElementById("segShowNumbersCheckbox");
 const btnSegZoomIn = document.getElementById("btnSegZoomIn");
 const btnSegZoomOut = document.getElementById("btnSegZoomOut");
 const btnSegZoomReset = document.getElementById("btnSegZoomReset");
@@ -41,8 +44,10 @@ const segBulkActionsBar = document.getElementById("segBulkActionsBar");
 const segSelectAllCells = document.getElementById("segSelectAllCells");
 const segBulkClassSelect = document.getElementById("segBulkClassSelect");
 const btnSegBulkApply = document.getElementById("btnSegBulkApply");
+const btnSegMarkRestCorrect = document.getElementById("btnSegMarkRestCorrect");
 const segModelStatusText = document.getElementById("segModelStatusText");
 const segModelPathInput = document.getElementById("segModelPathInput");
+const segLowConfidenceThresholdInput = document.getElementById("segLowConfidenceThresholdInput");
 const btnSegSaveModelConfig = document.getElementById("btnSegSaveModelConfig");
 
 const cameraDot = document.getElementById("cameraDot");
@@ -91,6 +96,7 @@ let segAddMode = false; // true kalau lagi mode "Tambah Sel Manual"
 let segHighlightedClassIndex = null; // kelas yang lagi di-highlight (klik baris/bar di ringkasan kelas)
 let segSelectedCellIds = new Set(); // dipakai buat koreksi kelas massal (bulk)
 let segResultsListCache = []; // cache hasil terakhir dari list-results, buat filter tanpa fetch ulang
+let segShowCellNumbers = true; // toggle label nomor sel di overlay Hasil Segmentasi
 
 // Zoom & pan gambar (Gambar Sumber / Hasil Segmentasi) -- diterapkan lewat
 // CSS transform di elemen gambar, jadi koordinat mask (pixel asli gambar)
@@ -107,7 +113,15 @@ let segMouseDownX = 0;
 let segMouseDownY = 0;
 let segMouseMoved = false;
 
-const SEG_LOW_CONFIDENCE_THRESHOLD = 0.7;
+// Pecahan 0-1, bukan konstanta -- bisa diatur dari panel "Status Model
+// Segmentasi" (lihat loadSegModelStatus/doSaveSegModelConfig), disimpan
+// server-side sebagai persen (0-100) di model_config.json.
+let segLowConfidenceThreshold = 0.7;
+
+// Batas radius efektif sel saat di-resize (lihat resizeActiveCell) -- biar
+// nggak bisa diciutkan sampai nyaris titik atau dibesarkan sampai keluar
+// gambar sama sekali.
+const MIN_CELL_RADIUS = 4;
 
 let selectedFolder = null;
 let hasCapturedImage = false;
@@ -800,6 +814,7 @@ function addManualCellAtEvent(e) {
     manual: true,
     correctedClassIndex: null,
     correctedClassLabel: null,
+    doctorVerdict: null,
   });
   renderSegmentationOverlay();
   renderDetectionsList();
@@ -807,6 +822,37 @@ function addManualCellAtEvent(e) {
   btnSaveSegmentation.disabled = false;
   setActiveCell(nextId);
   showToast("Sel manual ditambahkan -- atur kelasnya di daftar sel (atau tekan tombol angka).");
+}
+
+// Perbesar/perkecil sel yang lagi aktif/dipilih -- scale semua titik mask-nya
+// dari centroid (polygonCentroid), jadi bentuk relatifnya tetap sama, cuma
+// ukurannya yang berubah. Berlaku buat sel manapun (hasil model maupun
+// tambahan manual), bukan cuma yang manual.
+function resizeActiveCell(factor) {
+  if (segActiveCellId === null) return;
+  const det = segDetections.find((d) => d.id === segActiveCellId);
+  if (!det) return;
+
+  const [cx, cy] = polygonCentroid(det.mask);
+  const avgRadius =
+    det.mask.reduce((sum, [x, y]) => sum + Math.hypot(x - cx, y - cy), 0) / det.mask.length;
+  const maxRadius = Math.min(segImgW, segImgH) * 0.5;
+  const newRadius = avgRadius * factor;
+  if (newRadius < MIN_CELL_RADIUS || newRadius > maxRadius) return; // di luar batas, batalkan
+
+  const newMask = det.mask.map(([x, y]) => [
+    Math.round(cx + (x - cx) * factor),
+    Math.round(cy + (y - cy) * factor),
+  ]);
+  const xs = newMask.map((p) => p[0]);
+  const ys = newMask.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  det.mask = newMask;
+  det.bbox = [minX, minY, Math.max(...xs) - minX, Math.max(...ys) - minY];
+
+  renderSegmentationOverlay();
+  renderDetectionsList();
 }
 
 function deleteDetection(cellId) {
@@ -817,6 +863,7 @@ function deleteDetection(cellId) {
   renderDetectionsList();
   updateClassSummaryFromDetections();
   btnSaveSegmentation.disabled = segDetections.length === 0;
+  updateCellSizeButtonsState();
 }
 
 // Sinkronkan highlight baris di Daftar Sel <-> polygon di overlay gambar,
@@ -834,6 +881,15 @@ function setActiveCell(cellId) {
   }
   const activeRow = segDetectionsBody.querySelector(`.seg-detection-row[data-cell-id="${cellId}"]`);
   if (activeRow) activeRow.scrollIntoView({ block: "nearest" });
+  updateCellSizeButtonsState();
+}
+
+// Tombol resize (dan shortcut +/-) cuma masuk akal kalau ada sel yang lagi
+// dipilih -- dipanggil tiap kali segActiveCellId berubah (pilih/hapus/reset).
+function updateCellSizeButtonsState() {
+  const disabled = segActiveCellId === null;
+  btnSegCellShrink.disabled = disabled;
+  btnSegCellGrow.disabled = disabled;
 }
 
 function resetSegmentationResults() {
@@ -846,6 +902,7 @@ function resetSegmentationResults() {
   segSelectAllCells.checked = false;
   btnSegAddCell.classList.remove("btn-toggle-active");
   btnSegAddCell.disabled = true;
+  updateCellSizeButtonsState();
   resetSegZoom();
   segResultBody.innerHTML =
     '<span class="placeholder-text">Belum ada hasil<br />Klik "Jalankan Segmentasi" (hasilnya masih data dummy/placeholder)</span>';
@@ -913,8 +970,10 @@ function applyLoadedSegmentationResult(data) {
     ...d,
     correctedClassIndex: d.correctedClassIndex ?? null,
     correctedClassLabel: d.correctedClassLabel ?? null,
+    doctorVerdict: d.doctorVerdict ?? null, // kompatibel dgn file lama sblm fitur ini ada
   }));
   segActiveCellId = null;
+  updateCellSizeButtonsState();
   segAddMode = false;
   segHighlightedClassIndex = null;
   segSelectedCellIds = new Set();
@@ -1037,13 +1096,17 @@ function renderSegmentationOverlay() {
     const pts = d.mask.map((p) => p.join(",")).join(" ");
     // Confidence rendah -> garis putus-putus, biar langsung kelihatan mana
     // yang perlu diprioritaskan dicek manual.
-    const dashed = !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? ' stroke-dasharray="4,3"' : "";
+    const dashed = !d.manual && d.confidence < segLowConfidenceThreshold ? ' stroke-dasharray="4,3"' : "";
     const activeClass = d.id === segActiveCellId ? ' class="seg-polygon-active"' : "";
     polygons += `<polygon data-cell-id="${d.id}" points="${pts}" fill="${colorFor(idx)}33" stroke="${colorFor(idx)}" stroke-width="2"${dashed}${activeClass} />`;
     // Nomor label ini match sama "Sel #${i+1}" di daftar (renderDetectionsList)
-    // supaya user gampang korelasikan mask di gambar dengan baris di daftar.
-    const [cx, cy] = polygonCentroid(d.mask);
-    labels += `<text class="seg-cell-number-label" data-cell-id="${d.id}" x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="${numberFontSize}">${i + 1}</text>`;
+    // supaya user gampang korelasikan mask di gambar dengan baris di daftar --
+    // bisa disembunyikan lewat checkbox "Tampilkan Nomor Sel" (segShowCellNumbers)
+    // kalau lagi mengganggu pandangan pas menilai gambar polos.
+    if (segShowCellNumbers) {
+      const [cx, cy] = polygonCentroid(d.mask);
+      labels += `<text class="seg-cell-number-label" data-cell-id="${d.id}" x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-size="${numberFontSize}">${i + 1}</text>`;
+    }
   });
   segResultBody.innerHTML = `
     <div class="seg-overlay-wrap">
@@ -1055,11 +1118,20 @@ function renderSegmentationOverlay() {
   applySegClassHighlightToOverlay();
 }
 
-// Dipanggil tiap kali segDetections berubah -- biar jumlah sel di samping
-// tombol "Hasil Segmentasi" selalu konsisten sama daftar sel & overlay.
+// Dipanggil tiap kali segDetections berubah (termasuk tiap klik tombol
+// verdict dokter, lewat renderDetectionsList) -- biar jumlah sel + statistik
+// review dokter di samping tombol "Hasil Segmentasi" selalu konsisten sama
+// daftar sel & overlay, update live tanpa perlu Simpan/reload dulu.
 function updateSegTotalCellCount() {
-  segTotalCellCount.textContent =
-    segDetections.length > 0 ? `Jumlah sel terdeteksi: ${segDetections.length} sel` : "";
+  if (segDetections.length === 0) {
+    segTotalCellCount.textContent = "";
+    return;
+  }
+  const correct = segDetections.filter((d) => d.doctorVerdict === "correct").length;
+  const incorrect = segDetections.filter((d) => d.doctorVerdict === "incorrect").length;
+  const reviewed = correct + incorrect;
+  const verdictText = reviewed > 0 ? `, direview ${reviewed}/${segDetections.length} (✓${correct} ✗${incorrect})` : "";
+  segTotalCellCount.textContent = `Jumlah sel terdeteksi: ${segDetections.length} sel${verdictText}`;
 }
 
 function renderDetectionsList() {
@@ -1084,20 +1156,27 @@ function renderDetectionsList() {
           : "";
       const manualTag = d.manual ? ' <span class="seg-manual-tag">manual</span>' : "";
       const lowConf =
-        !d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD
+        !d.manual && d.confidence < segLowConfidenceThreshold
           ? ' <span class="seg-low-conf-tag">confidence rendah</span>'
           : "";
       const rowClass =
         "summary-row seg-detection-row" +
-        (!d.manual && d.confidence < SEG_LOW_CONFIDENCE_THRESHOLD ? " seg-row-low-confidence" : "") +
+        (!d.manual && d.confidence < segLowConfidenceThreshold ? " seg-row-low-confidence" : "") +
         (d.id === segActiveCellId ? " seg-row-active" : "");
       const checked = segSelectedCellIds.has(d.id) ? " checked" : "";
+      // Penilaian dokter: apakah klasifikasi sel ini benar/salah menurut
+      // reviewer -- independen dari correctedClassIndex (dokter bisa saja
+      // menandai "salah" tanpa langsung mengganti kelasnya, atau sebaliknya).
+      const verdictCorrectActive = d.doctorVerdict === "correct" ? " active" : "";
+      const verdictIncorrectActive = d.doctorVerdict === "incorrect" ? " active" : "";
       return `
         <div class="${rowClass}" data-cell-id="${d.id}">
           <input type="checkbox" class="seg-cell-checkbox" data-cell-id="${d.id}"${checked} />
           <span>Sel #${i + 1} (conf. ${(d.confidence * 100).toFixed(0)}%)${corrected}${manualTag}${lowConf}</span>
           <div class="seg-row-controls">
             <select class="seg-class-select" data-cell-id="${d.id}">${options}</select>
+            <button type="button" class="seg-doctor-btn seg-doctor-btn-correct${verdictCorrectActive}" data-cell-id="${d.id}" data-verdict="correct" title="Tandai klasifikasi ini BENAR (penilaian dokter)">&check;</button>
+            <button type="button" class="seg-doctor-btn seg-doctor-btn-incorrect${verdictIncorrectActive}" data-cell-id="${d.id}" data-verdict="incorrect" title="Tandai klasifikasi ini SALAH (penilaian dokter)">&cross;</button>
             <button type="button" class="seg-delete-btn" data-cell-id="${d.id}" title="Hapus deteksi ini">&times;</button>
           </div>
         </div>
@@ -1117,6 +1196,19 @@ function renderDetectionsList() {
       renderDetectionsList();
       renderSegmentationOverlay();
       updateClassSummaryFromDetections();
+    });
+  });
+
+  segDetectionsBody.querySelectorAll(".seg-doctor-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const cellId = parseInt(btn.dataset.cellId, 10);
+      const det = segDetections.find((d) => d.id === cellId);
+      if (!det) return;
+      const verdict = btn.dataset.verdict;
+      // Klik tombol yang sama dua kali -> batalkan (balik ke "belum direview").
+      det.doctorVerdict = det.doctorVerdict === verdict ? null : verdict;
+      renderDetectionsList();
     });
   });
 
@@ -1193,8 +1285,10 @@ async function doRunSegmentation() {
     ...d,
     correctedClassIndex: null,
     correctedClassLabel: null,
+    doctorVerdict: null,
   }));
   segActiveCellId = null;
+  updateCellSizeButtonsState();
   segAddMode = false;
   segHighlightedClassIndex = null;
   segSelectedCellIds = new Set();
@@ -1291,10 +1385,13 @@ async function doLoadSegPatientSummary() {
     return;
   }
   segPatientSummaryBody.innerHTML = data.patients
-    .map(
-      (p) =>
-        `<div class="summary-row"><span>${p.patientId}</span><span>${p.totalImages} gambar, ${p.totalCells} sel</span></div>`
-    )
+    .map((p) => {
+      const verdictText =
+        p.totalReviewed > 0
+          ? `, direview ${p.totalReviewed} (✓${p.totalCorrect} ✗${p.totalIncorrect})`
+          : "";
+      return `<div class="summary-row"><span>${p.patientId}</span><span>${p.totalImages} gambar, ${p.totalCells} sel${verdictText}</span></div>`;
+    })
     .join("");
 }
 
@@ -1515,6 +1612,25 @@ function doSegBulkApply() {
   showToast(`${count} sel diubah ke kelas "${newLabel}". Jangan lupa klik "Simpan Hasil".`);
 }
 
+// Alur "review by exception": dokter cuma perlu tandai sel yang SALAH (klik
+// &cross; satu-satu), lalu sekali klik ini buat menandai eksplisit semua sel
+// yang belum disentuh (doctorVerdict masih null) sebagai Benar. Sengaja
+// TIDAK ada asumsi diam-diam "belum direview = benar" di tempat lain manapun
+// (lihat updateSegTotalCellCount/Ringkasan per Pasien) -- ini satu-satunya
+// jalan buat sel jadi "benar", dan itu pun lewat aksi eksplisit dokter,
+// bukan default otomatis, biar datanya tetap bisa dipercaya kalau nanti
+// dipakai buat evaluasi model.
+function doSegMarkRestCorrect() {
+  const unreviewed = segDetections.filter((d) => d.doctorVerdict === null || d.doctorVerdict === undefined);
+  if (unreviewed.length === 0) {
+    showToast("Semua sel sudah direview (Benar/Salah).");
+    return;
+  }
+  unreviewed.forEach((d) => (d.doctorVerdict = "correct"));
+  renderDetectionsList();
+  showToast(`${unreviewed.length} sel yang belum direview ditandai Benar. Jangan lupa klik "Simpan Hasil".`);
+}
+
 // -----------------------------------------------------------------------
 // Status & konfigurasi model segmentasi (placeholder -- lihat catatan di
 // app.py, belum ada inference model beneran yang terpasang)
@@ -1525,6 +1641,10 @@ async function loadSegModelStatus() {
     const data = await res.json();
     segModelStatusText.textContent = data.message || "Status model tidak diketahui.";
     segModelPathInput.value = data.modelPath || "";
+    if (data.lowConfidenceThreshold) {
+      segLowConfidenceThresholdInput.value = data.lowConfidenceThreshold;
+      segLowConfidenceThreshold = data.lowConfidenceThreshold / 100;
+    }
   } catch (e) {
     segModelStatusText.textContent = "Gagal memuat status model.";
   }
@@ -1536,7 +1656,10 @@ async function doSaveSegModelConfig() {
   const res = await fetch("/api/segmentation/model-config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ modelPath: segModelPathInput.value.trim() }),
+    body: JSON.stringify({
+      modelPath: segModelPathInput.value.trim(),
+      lowConfidenceThreshold: parseInt(segLowConfidenceThresholdInput.value, 10),
+    }),
   });
   const data = await res.json();
   btnSegSaveModelConfig.disabled = false;
@@ -1544,6 +1667,16 @@ async function doSaveSegModelConfig() {
   if (!data.ok) {
     showToast(data.message || "Gagal menyimpan konfigurasi model.");
     return;
+  }
+  if (data.lowConfidenceThreshold) {
+    segLowConfidenceThresholdInput.value = data.lowConfidenceThreshold;
+    segLowConfidenceThreshold = data.lowConfidenceThreshold / 100;
+    // Langsung terapkan ke hasil yang lagi ditampilkan (kalau ada) biar badge
+    // & garis putus-putus "confidence rendah" nggak perlu jalan ulang segmentasi.
+    if (segDetections.length > 0) {
+      renderSegmentationOverlay();
+      renderDetectionsList();
+    }
   }
   showToast("Konfigurasi model tersimpan.");
   loadSegModelStatus();
@@ -1588,6 +1721,16 @@ window.addEventListener("keydown", (e) => {
     if (curIdx === -1) return;
     const nextIdx = Math.max(0, Math.min(ids.length - 1, curIdx + (e.key === "ArrowDown" ? 1 : -1)));
     setActiveCell(ids[nextIdx]);
+    return;
+  }
+  if (e.key === "+" || e.key === "=") {
+    e.preventDefault();
+    resizeActiveCell(1.1);
+    return;
+  }
+  if (e.key === "-" || e.key === "_") {
+    e.preventDefault();
+    resizeActiveCell(1 / 1.1);
   }
 });
 
@@ -1631,6 +1774,12 @@ segTabDetections.addEventListener("click", () => switchSegListTab("detections"))
 segTabFolderResults.addEventListener("click", doLoadSegResultsListButton);
 
 btnSegAddCell.addEventListener("click", toggleSegAddMode);
+btnSegCellShrink.addEventListener("click", () => resizeActiveCell(1 / 1.1));
+btnSegCellGrow.addEventListener("click", () => resizeActiveCell(1.1));
+segShowNumbersCheckbox.addEventListener("change", () => {
+  segShowCellNumbers = segShowNumbersCheckbox.checked;
+  renderSegmentationOverlay();
+});
 btnSegZoomIn.addEventListener("click", () => setSegZoom(segZoom + 0.25));
 btnSegZoomOut.addEventListener("click", () => setSegZoom(segZoom - 0.25));
 btnSegZoomReset.addEventListener("click", resetSegZoom);
@@ -1648,6 +1797,7 @@ btnSegExportReport.addEventListener("click", doExportSegReport);
 segResultsFilter.addEventListener("input", applySegResultsFilter);
 segSelectAllCells.addEventListener("change", toggleSegSelectAll);
 btnSegBulkApply.addEventListener("click", doSegBulkApply);
+btnSegMarkRestCorrect.addEventListener("click", doSegMarkRestCorrect);
 btnSegSaveModelConfig.addEventListener("click", doSaveSegModelConfig);
 
 btnConnectCamera.addEventListener("click", connectCamera);
